@@ -1,0 +1,53 @@
+// AUTHOR : NANDHAKUMAR S V
+//VERSION : 1.0.0
+//DESCRIPTION : Environment configuration for the booking system
+// DATE : 2026-08-26
+import { z } from 'zod';
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(here, '../../../.env') });
+dotenv.config({ path: path.resolve(here, '../../.env') });
+
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(5000),
+  DB_SERVER: z.string().min(1),
+  DB_PORT: z.coerce.number().default(3306),
+  DB_NAME: z.string().min(1),
+  DB_USER: z.string().min(1),
+  DB_PASSWORD: z.string().min(1),
+  DB_ENCRYPT: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
+  DB_TRUST_SERVER_CERTIFICATE: z
+    .string()
+    .optional()
+    .transform((v) => v !== 'false'),
+  JWT_SECRET: z.string().min(16),
+  JWT_REFRESH_SECRET: z.string().min(16),
+  JWT_ACCESS_EXPIRES: z.string().default('15m'),
+  JWT_REFRESH_EXPIRES: z.string().default('7d'),
+  BCRYPT_ROUNDS: z.coerce.number().default(12),
+  FRONTEND_URL: z.string().default('http://10.103.10.33'),
+  API_URL: z.string().default('http://10.103.10.33/api'),
+  SMTP_HOST: z.string().optional().default(''),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional().default(''),
+  SMTP_PASSWORD: z.string().optional().default(''),
+  SMTP_FROM: z.string().optional().default('noreply@corp.local'),
+  UPLOAD_DIR: z.string().default('./uploads'),
+  MAX_UPLOAD_MB: z.coerce.number().default(5),
+});
+
+const parsed = schema.safeParse(process.env);
+if (!parsed.success) {
+  const missing = parsed.error.issues.map((i) => i.path.join('.')).join(', ');
+  throw new Error(`Invalid environment: ${missing}`);
+}
+
+export const env = parsed.data;
+export const isProd = env.NODE_ENV === 'production';
