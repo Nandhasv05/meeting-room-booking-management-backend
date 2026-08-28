@@ -24,12 +24,12 @@ export async function listEvents(user: AuthUser, filters: { q?: string; from?: s
     `SELECT e.Id, e.BookingId, e.Description, e.ExpectedAttendees, e.ActualAttendees, e.Requirements,
             b.EventName, b.EventType, b.StartAt, b.EndAt, b.Status, b.AttendeeCount,
             h.Name AS HallName, h.Code AS HallCode, d.Name AS DepartmentName,
-            CONCAT(o.FirstName, ' ', o.LastName) AS OrganizerName, o.Phone AS Contact
+            o.UserName AS OrganizerName, CAST(NULL AS nvarchar(30)) AS Contact
      FROM dbo.events e
      JOIN dbo.bookings b ON b.Id = e.BookingId
      JOIN dbo.conference_halls h ON h.Id = b.HallId
      JOIN dbo.departments d ON d.Id = b.DepartmentId
-     JOIN dbo.users o ON o.Id = b.OrganizerId
+     JOIN dbo.users o ON CAST(o.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
      WHERE ${where.join(' AND ')}
      ORDER BY b.StartAt DESC`,
     inputs,
@@ -41,12 +41,12 @@ export async function getEvent(id: string) {
     `SELECT e.Id, e.BookingId, e.Description, e.ExpectedAttendees, e.ActualAttendees, e.Requirements, e.UpdatedAt,
             b.EventName, b.EventType, b.StartAt, b.EndAt, b.Status, b.Purpose, b.AttendeeCount,
             b.OrganizerId, h.Name AS HallName, h.Code AS HallCode, d.Name AS DepartmentName,
-            CONCAT(o.FirstName, ' ', o.LastName) AS OrganizerName, o.Phone AS Contact, o.Email AS OrganizerEmail
+            o.UserName AS OrganizerName, CAST(NULL AS nvarchar(30)) AS Contact, o.Email AS OrganizerEmail
      FROM dbo.events e
      JOIN dbo.bookings b ON b.Id = e.BookingId
      JOIN dbo.conference_halls h ON h.Id = b.HallId
      JOIN dbo.departments d ON d.Id = b.DepartmentId
-     JOIN dbo.users o ON o.Id = b.OrganizerId
+     JOIN dbo.users o ON CAST(o.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
      WHERE e.Id = @Id`,
     { Id: id },
   );

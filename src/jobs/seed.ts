@@ -1,39 +1,11 @@
-import { getPool, query, queryOne, insert, closePool } from '../config/database.js';
-import { hashPassword } from '../utils/password.js';
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Seed booking system
+// DATE : 2026-08-26
+import { getPool, query, queryOne, queryOneSoft, querySoft, insert, closePool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 
-const PASSWORD = 'password#1';
-
-const demoUsers = [
-  {
-    employeeId: 'EMP2001',
-    first: 'Admin',
-    last: 'User',
-    email: 'admin@evoloclothing.com',
-    role: 'ADMINISTRATOR',
-    dept: 'IT',
-    designation: 'Administrator',
-  },
-  {
-    employeeId: 'EMP2002',
-    first: 'Hall',
-    last: 'Manager',
-    email: 'manager@evlovcolthing.com',
-    role: 'HALL_MANAGER',
-    dept: 'OPS',
-    designation: 'Hall Manager',
-  },
-  {
-    employeeId: 'EMP2003',
-    first: 'Nandhakumar',
-    last: 'DS',
-    email: 'nandhakumar@evolvclothing.com',
-    role: 'EMPLOYEE',
-    dept: 'HR',
-    designation: 'Employee',
-  },
-];
-
+/** Halls */
 const halls = [
   { name: 'Main Conference Hall', code: 'MCH-01', type: 'CONFERENCE', cap: 180, building: 'Tower A', floor: '2', loc: 'Tower A, Level 2' },
   { name: 'Board Room A', code: 'BR-A', type: 'BOARDROOM', cap: 16, building: 'Tower A', floor: '12', loc: 'Executive floor' },
@@ -43,78 +15,22 @@ const halls = [
   { name: 'Auditorium', code: 'AUD-01', type: 'AUDITORIUM', cap: 220, building: 'Tower C', floor: 'G', loc: 'Campus east' },
 ];
 
-async function upsertUser(
-  u: (typeof demoUsers)[number],
-  hash: string,
-): Promise<void> {
-  const role = await queryOne<{ Id: string }>(`SELECT Id FROM dbo.roles WHERE Code = @Code`, { Code: u.role });
-  const dept = await queryOne<{ Id: string }>(`SELECT Id FROM dbo.departments WHERE Code = @Code`, { Code: u.dept });
-  if (!role) throw new Error(`Missing role ${u.role}. Run database/seeds/001_lookups.sql first.`);
-
-  const existing = await queryOne<{ Id: string }>(`SELECT Id FROM dbo.users WHERE Email = @Email`, {
-    Email: u.email,
-  });
-
-  if (existing) {
-    await query(
-      `UPDATE dbo.users SET
-          PasswordHash = @Hash,
-          RoleId = @RoleId,
-          Status = N'ACTIVE',
-          DeletedAt = NULL,
-          FirstName = @FirstName,
-          LastName = @LastName,
-          DepartmentId = @DepartmentId,
-          Designation = @Designation,
-          UpdatedAt = SYSUTCDATETIME()
-       WHERE Id = @Id`,
-      {
-        Id: existing.Id,
-        Hash: hash,
-        RoleId: role.Id,
-        FirstName: u.first,
-        LastName: u.last,
-        DepartmentId: dept?.Id ?? null,
-        Designation: u.designation,
-      },
-    );
-    logger.info({ email: u.email, role: u.role }, 'updated user password/role');
-    return;
-  }
-
-  await insert(
-    `INSERT INTO dbo.users (EmployeeId, FirstName, LastName, Email, Phone, DepartmentId, Designation, PasswordHash, RoleId, Status)
-     VALUES (@EmployeeId, @FirstName, @LastName, @Email, @Phone, @DepartmentId, @Designation, @Hash, @RoleId, N'ACTIVE')`,
-    {
-      EmployeeId: u.employeeId,
-      FirstName: u.first,
-      LastName: u.last,
-      Email: u.email,
-      Phone: '044-4000-1000',
-      DepartmentId: dept?.Id ?? null,
-      Designation: u.designation,
-      Hash: hash,
-      RoleId: role.Id,
-    },
-  );
-  logger.info({ email: u.email, role: u.role }, 'seeded user');
-}
-
+/** Main */
 async function main() {
   await getPool();
-  const hash = await hashPassword(PASSWORD);
-
-  for (const u of demoUsers) {
-    await upsertUser(u, hash);
+  const hallsTable = await queryOne<{ Id: number | null }>(`SELECT OBJECT_ID(N'dbo.conference_halls', N'U') AS Id`);
+  if (!hallsTable?.Id) {
+    logger.error(
+      'dbo.conference_halls is missing. A db_owner must run database/sqlserver/booking_schema.sql then grant_booking_tables.sql.',
+    );
+    await closePool();
+    process.exit(1);
   }
-
-  const admin = await queryOne<{ Id: string }>(
-    `SELECT Id FROM dbo.users WHERE Email = N'admin@evoloclothing.com'`,
-  );
-  const facilities = await query<{ Id: string; Code: string }>(`SELECT Id, Code FROM dbo.facilities`);
+  const contact = await queryOne<{ Id: string }>(`SELECT TOP (1) CAST(Id AS nvarchar(64)) AS Id FROM dbo.users ORDER BY UserName`);
+  const facilities = await querySoft<{ Id: string; Code: string }>(`SELECT Id, Code FROM dbo.facilities`);
 
   for (const h of halls) {
-    const exists = await queryOne(`SELECT Id FROM dbo.conference_halls WHERE Code = @Code`, { Code: h.code });
+    const exists = await queryOneSoft(`SELECT Id FROM dbo.conference_halls WHERE Code = @Code`, { Code: h.code });
     if (exists) continue;
     const id = await insert(
       `INSERT INTO dbo.conference_halls
@@ -130,8 +46,8 @@ async function main() {
         Floor: h.floor,
         Cap: h.cap,
         Type: h.type,
-        Contact: admin?.Id ?? null,
-        Actor: admin?.Id ?? null,
+        Contact: contact?.Id ?? null,
+        Actor: contact?.Id ?? null,
       },
     );
     const pick = facilities.filter((f) =>
@@ -151,10 +67,74 @@ async function main() {
     logger.info({ code: h.code }, 'seeded hall');
   }
 
-  logger.info('Seed complete. Login password for all test users: password#1');
+  await seedDemoBooking(contact?.Id ?? null);
+
+  logger.info('Seed complete. Sign in with a CLIENT_API_LIVE dbo.users username.');
   await closePool();
 }
 
+async function seedDemoBooking(actorId: string | null) {
+  const exists = await queryOne(`SELECT Id FROM dbo.bookings WHERE BookingNumber = N'BK-DEMO-001' AND DeletedAt IS NULL`);
+  if (exists) {
+    logger.info('demo booking BK-DEMO-001 already present');
+    return;
+  }
+  const hall = await queryOne<{ Id: string }>(`SELECT TOP (1) Id FROM dbo.conference_halls WHERE Code = N'MCH-01' AND DeletedAt IS NULL`);
+  const dept = await queryOne<{ Id: string }>(
+    `SELECT TOP (1) Id FROM dbo.departments WHERE DeletedAt IS NULL ORDER BY CASE WHEN Code = N'TCS' THEN 0 ELSE 1 END, Id`,
+  );
+  const layout = await queryOne<{ Id: string }>(
+    `SELECT TOP (1) Id FROM dbo.hall_seating_layouts WHERE HallId = @HallId ORDER BY IsDefault DESC`,
+    { HallId: hall?.Id ?? null },
+  );
+  if (!hall || !dept || !actorId) {
+    logger.warn('skip demo booking — need a hall, department, and dbo.users row');
+    return;
+  }
+  const start = new Date();
+  start.setDate(start.getDate() + 1);
+  start.setHours(10, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(12, 0, 0, 0);
+  const bookingId = await insert(
+    `INSERT INTO dbo.bookings (
+        BookingNumber, EventName, EventType, DepartmentId, OrganizerId, ContactEmail, HallId,
+        BookingDate, StartAt, EndAt, AttendeeCount, SeatingLayoutId, Purpose, CateringRequired,
+        Status, QrToken, RequiresApproval, CreatedBy, UpdatedBy
+      ) VALUES (
+        N'BK-DEMO-001', N'Sample team standup', N'MEETING', @DepartmentId, @OrganizerId, N'saideep@evolvclothing.com', @HallId,
+        CAST(@StartAt AS DATE), @StartAt, @EndAt, 8, @LayoutId, N'Demo booking for full-flow testing.', 0,
+        N'CONFIRMED', N'demo-qr-bk-001', 0, @Actor, @Actor
+      )`,
+    {
+      DepartmentId: dept.Id,
+      OrganizerId: actorId,
+      HallId: hall.Id,
+      StartAt: start,
+      EndAt: end,
+      LayoutId: layout?.Id ?? null,
+      Actor: actorId,
+    },
+  );
+  await insert(
+    `INSERT INTO dbo.events (BookingId, Description, ExpectedAttendees) VALUES (@BookingId, N'Demo booking for full-flow testing.', 8)`,
+    { BookingId: bookingId },
+  );
+  await query(
+    `INSERT INTO dbo.booking_status_history (BookingId, FromStatus, ToStatus, Comment, ActorId)
+     VALUES (@BookingId, NULL, N'CONFIRMED', N'Sample seed', @Actor)`,
+    { BookingId: bookingId, Actor: actorId },
+  );
+  await query(
+    `INSERT INTO dbo.booking_attendees (BookingId, Name, Email, Department, AttendanceStatus)
+     VALUES (@BookingId, N'Admin', N'saideep@evolvclothing.com', N'TCS', N'INVITED'),
+            (@BookingId, N'Geetha', N'vgeetha@evolvclothing.com', N'HR', N'INVITED')`,
+    { BookingId: bookingId },
+  );
+  logger.info({ bookingId, number: 'BK-DEMO-001' }, 'seeded demo booking');
+}
+
+/** Catch */
 main().catch((err) => {
   logger.fatal({ err }, 'seed failed');
   process.exit(1);

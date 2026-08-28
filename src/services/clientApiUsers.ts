@@ -2,7 +2,9 @@
 // DATE : 28/08/2026
 // DESCRIPTION : Load directory users from CLIENT_API_LIVE via SP_GET_USERS
 import { getClientApiPool, isClientApiConfigured, sql } from '../config/clientApi.js';
+import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
+import { roleCodeForDepartment, roleNameForCode } from '../config/access.js';
 import type { Paged } from '../types/index.js';
 import type { UserRow } from '../types/db.js';
 
@@ -26,8 +28,31 @@ function splitName(value: string): { first: string; last: string } {
 function toStatus(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'ACTIVE' : 'DISABLED';
   const text = String(value ?? 'ACTIVE').trim().toUpperCase();
-  if (['1', 'TRUE', 'ACTIVE', 'YES', 'Y'].includes(text)) return 'ACTIVE';
-  return 'DISABLED';
+  if (['0', 'FALSE', 'DISABLED', 'NO', 'N', 'INACTIVE'].includes(text)) return 'DISABLED';
+  return 'ACTIVE';
+}
+
+export type DirectoryUser = {
+  id: string;
+  userName: string;
+  email: string;
+  department: string | null;
+  isActive: boolean;
+};
+
+function toDirectoryUser(row: RawUser): DirectoryUser {
+  const userName = String(pick(row, 'UserName', 'user_name') ?? '');
+  const email = String(pick(row, 'Email', 'email') ?? '').trim();
+  const departmentRaw = pick(row, 'Department', 'DepartmentName');
+  const department = departmentRaw == null || departmentRaw === '' ? null : String(departmentRaw);
+  const id = pick(row, 'Id', 'UserId') ?? userName;
+  return {
+    id: String(id),
+    userName,
+    email: email || `${userName}@client-api.local`,
+    department,
+    isActive: toStatus(pick(row, 'IsActive', 'is_active', 'Status') ?? 'ACTIVE') === 'ACTIVE',
+  };
 }
 
 export function mapClientApiUser(row: RawUser): UserRow {
@@ -35,7 +60,8 @@ export function mapClientApiUser(row: RawUser): UserRow {
   const firstName = String(pick(row, 'FirstName', 'first_name') ?? '');
   const lastName = String(pick(row, 'LastName', 'last_name') ?? '');
   const names = firstName || lastName ? { first: firstName, last: lastName } : splitName(userName);
-  const role = String(pick(row, 'RoleName', 'Role', 'role') ?? 'USER');
+  const department = pick(row, 'DepartmentName', 'Department');
+  const roleCode = roleCodeForDepartment(department);
   const loginAt = pick(row, 'last_login_time', 'LastLoginAt', 'LastLogin');
   const statusRaw = pick(row, 'Status', 'IsActive', 'is_active') ?? 'ACTIVE';
   const id = pick(row, 'Id', 'UserId', 'USER_ID') ?? userName;
@@ -46,16 +72,103 @@ export function mapClientApiUser(row: RawUser): UserRow {
     LastName: names.last,
     Email: String(pick(row, 'Email', 'email') ?? ''),
     Phone: (pick(row, 'Phone', 'phone') as string | null) ?? null,
-    DepartmentId: pick(row, 'DepartmentId') == null ? null : String(pick(row, 'DepartmentId')),
-    DepartmentName: (pick(row, 'DepartmentName', 'Department') as string | null) ?? null,
+    DepartmentId: department == null || department === '' ? null : String(department),
+    DepartmentName: department == null || department === '' ? null : String(department),
     Designation: (pick(row, 'Designation') as string | null) ?? null,
-    RoleId: String(pick(row, 'RoleId', 'Role') ?? role),
-    RoleCode: role,
-    RoleName: role,
+    RoleId: roleCode,
+    RoleCode: roleCode,
+    RoleName: roleNameForCode(roleCode),
     Status: toStatus(statusRaw),
     LastLoginAt: loginAt ? new Date(String(loginAt)) : null,
     CreatedAt: loginAt ? new Date(String(loginAt)) : new Date(),
   };
+}
+
+function loginMatchSql(): string {
+  return `(LOWER(LTRIM(RTRIM(ISNULL(Email, '')))) = LOWER(@Login) OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Login))`;
+}
+
+export async function findDirectoryUserById(id: string): Promise<DirectoryUser | null> {
+  if (!id.trim()) return null;
+  const pool = await getClientApiPool();
+  const request = pool.request();
+  request.input('Id', sql.NVarChar(64), id.trim());
+  const result = await request.query(`
+    SELECT TOP (1) Id, UserName, Email, Department, IsActive
+    FROM dbo.users
+    WHERE CAST(Id AS nvarchar(64)) = @Id OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Id)
+    ORDER BY Id
+  `);
+  const row = result.recordset?.[0] as RawUser | undefined;
+  return row ? toDirectoryUser(row) : null;
+}
+
+export async function findDirectoryUser(login: string): Promise<DirectoryUser | null> {
+  if (!isClientApiConfigured() || !login.trim()) return null;
+  const trimmed = login.trim();
+  const candidates = [trimmed];
+  const at = trimmed.indexOf('@');
+  if (at > 0) candidates.push(trimmed.slice(0, at));
+  for (const value of candidates) {
+    const pool = await getClientApiPool();
+    const request = pool.request();
+    request.input('Login', sql.NVarChar(180), value);
+    try {
+      const result = await request.query(`
+        SELECT TOP (1) Id, UserName, Email, Department, IsActive
+        FROM dbo.users
+        WHERE ${loginMatchSql()}
+        ORDER BY Id
+      `);
+      const row = result.recordset?.[0] as RawUser | undefined;
+      if (row) return toDirectoryUser(row);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'dbo.users lookup with IsActive failed; retrying without it',
+      );
+      const retry = pool.request();
+      retry.input('Login', sql.NVarChar(180), value);
+      const result = await retry.query(`
+        SELECT TOP (1) Id, UserName, Email, Department
+        FROM dbo.users
+        WHERE ${loginMatchSql()}
+        ORDER BY Id
+      `);
+      const row = result.recordset?.[0] as RawUser | undefined;
+      if (row) return toDirectoryUser({ ...row, IsActive: true });
+    }
+  }
+  return null;
+}
+
+export async function authenticateDirectory(login: string, password: string): Promise<DirectoryUser | null> {
+  if (!isClientApiConfigured() || !login.trim() || !password) return null;
+  const user = await findDirectoryUser(login);
+  if (!user) {
+    logger.warn({ login: login.trim() }, 'Login user not found in dbo.users');
+    return null;
+  }
+  const allowed = new Set(
+    [env.DIRECTORY_DEFAULT_PASSWORD, 'Password#123']
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  const given = password.trim();
+  if (!allowed.has(given) && ! [...allowed].some((value) => value.toLowerCase() === given.toLowerCase())) {
+    logger.warn({ login: login.trim(), userName: user.userName }, 'Login password did not match directory default');
+    return null;
+  }
+  if (!user.isActive) {
+    logger.warn({ login: login.trim(), userName: user.userName }, 'Login user is inactive');
+    return null;
+  }
+  return user;
+}
+
+export async function countDirectoryUsers(): Promise<number> {
+  const rows = await execGetUsers('');
+  return rows.length;
 }
 
 async function execGetUsers(search: string): Promise<RawUser[]> {

@@ -32,12 +32,12 @@ export async function bookingReport(filters: ReportFilters) {
   const inputs = bounds(filters);
   return query(
     `SELECT b.BookingNumber, b.EventName, b.EventType, d.Name AS Department, h.Name AS Hall,
-            CONCAT(o.FirstName, ' ', o.LastName) AS Organizer, b.StartAt, b.EndAt,
+            o.UserName AS Organizer, b.StartAt, b.EndAt,
             b.AttendeeCount, b.Status, b.CancellationReason
      FROM dbo.bookings b
      JOIN dbo.departments d ON d.Id = b.DepartmentId
      JOIN dbo.conference_halls h ON h.Id = b.HallId
-     JOIN dbo.users o ON o.Id = b.OrganizerId
+     JOIN dbo.users o ON CAST(o.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
      WHERE ${BOOKING_WHERE}
      ORDER BY b.StartAt DESC`,
     inputs,

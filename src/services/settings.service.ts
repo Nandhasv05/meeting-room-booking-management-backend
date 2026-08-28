@@ -51,11 +51,15 @@ function liveEnvMail(): { host: string; port: string; user: string; password: st
 }
 
 export async function getSetting(key: string): Promise<string | null> {
-  const row = await queryOne<Record<string, unknown>>(`SELECT [Value] FROM dbo.system_settings WHERE [Key] = @Key`, {
-    Key: key,
-  });
-  if (!row) return null;
-  return asText(row.Value ?? row.value);
+  try {
+    const row = await queryOne<Record<string, unknown>>(`SELECT [Value] FROM dbo.system_settings WHERE [Key] = @Key`, {
+      Key: key,
+    });
+    if (!row) return null;
+    return asText(row.Value ?? row.value);
+  } catch {
+    return null;
+  }
 }
 
 export async function getSettingBool(key: string, fallback = false): Promise<boolean> {
@@ -107,19 +111,23 @@ export async function ensureMailSettings(): Promise<void> {
 
 /** If Settings still has a blank SMTP field, copy it from .env so invites can send. */
 export async function hydrateMailFromEnv(): Promise<void> {
-  const fromEnv = liveEnvMail();
-  const fill: { key: string; value: string }[] = [
-    { key: 'smtp.host', value: fromEnv.host },
-    { key: 'smtp.port', value: fromEnv.port },
-    { key: 'smtp.user', value: fromEnv.user },
-    { key: 'smtp.password', value: fromEnv.password },
-    { key: 'smtp.from', value: fromEnv.from },
-  ];
-  for (const row of fill) {
-    if (!row.value) continue;
-    const current = ((await getSetting(row.key)) || '').trim();
-    if (current) continue;
-    await writeSetting(row.key, row.value);
+  try {
+    const fromEnv = liveEnvMail();
+    const fill: { key: string; value: string }[] = [
+      { key: 'smtp.host', value: fromEnv.host },
+      { key: 'smtp.port', value: fromEnv.port },
+      { key: 'smtp.user', value: fromEnv.user },
+      { key: 'smtp.password', value: fromEnv.password },
+      { key: 'smtp.from', value: fromEnv.from },
+    ];
+    for (const row of fill) {
+      if (!row.value) continue;
+      const current = ((await getSetting(row.key)) || '').trim();
+      if (current) continue;
+      await writeSetting(row.key, row.value);
+    }
+  } catch {
+    /* dbo.system_settings may not exist until a DBA runs booking_schema.sql */
   }
 }
 

@@ -1,217 +1,233 @@
 // AUTHOR : NANDHAKUMAR S V
-//VERSION : 1.0.0
-//DESCRIPTION : Database configuration for the booking system
-// DATE : 2026-08-26
-import mysql from 'mysql2/promise';
-import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+// VERSION : 1.0.0
+// DESCRIPTION : SQL Server pool for CLIENT_API_LIVE (all APIs)
+// DATE : 2026-08-28
+import sql from 'mssql';
 import { env } from './env.js';
 import { logger } from './logger.js';
 
-let pool: Pool | null = null;
+let pool: sql.ConnectionPool | null = null;
 
+/** Sql inputs */   
 export type SqlInputs = Record<string, unknown>;
-export type DbTx = PoolConnection;
+/** Db transaction */
+export type DbTx = sql.Transaction;
+/** Sql config */
+export type SqlConfig = sql.config;
 
-export function isDbReady(): boolean {
-  return pool != null;
-}
-
-export function translateSql(sql: string): string {
-  let s = sql;
-  s = s.replace(/\bdbo\./g, '');
-  s = s.replace(/SYSUTCDATETIME\(\)/gi, 'UTC_TIMESTAMP()');
-  s = s.replace(/\bN'/g, "'");
-  s = s.replace(/\[Key\]/g, '`Key`');
-  s = s.replace(/\[Value\]/g, '`Value`');
-  s = s.replace(/OFFSET\s+@Offset\s+ROWS\s+FETCH\s+NEXT\s+@PageSize\s+ROWS\s+ONLY/gi, 'LIMIT @Offset, @PageSize');
-  s = s.replace(/OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY/gi, 'LIMIT $1, $2');
-  s = s.replace(/DATEDIFF\(MINUTE,\s*([^,]+),\s*([^)]+)\)/gi, 'TIMESTAMPDIFF(MINUTE, $1, $2)');
-  s = s.replace(/DATEDIFF\(HOUR,\s*([^,]+),\s*([^)]+)\)/gi, 'TIMESTAMPDIFF(HOUR, $1, $2)');
-  s = s.replace(/DATEADD\(MINUTE,\s*@Minutes,\s*UTC_TIMESTAMP\(\)\)/gi, 'DATE_ADD(UTC_TIMESTAMP(), INTERVAL @Minutes MINUTE)');
-  s = s.replace(/DATEADD\(DAY,\s*-30,\s*UTC_TIMESTAMP\(\)\)/gi, 'DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 DAY)');
-  s = s.replace(/DATEPART\(HOUR,\s*([^)]+)\)/gi, 'HOUR($1)');
-  s = s.replace(/CONVERT\(varchar\(8\),\s*([^,]+),\s*108\)/gi, "TIME_FORMAT($1, '%H:%i:%s')");
-  s = s.replace(/CONVERT\(varchar\(10\),\s*CAST\(([^)]+) AS DATE\),\s*23\)/gi, "DATE_FORMAT($1, '%Y-%m-%d')");
-  s = s.replace(/CONVERT\(varchar\(10\),\s*DATE\(([^)]+)\),\s*23\)/gi, "DATE_FORMAT($1, '%Y-%m-%d')");
-  s = s.replace(/CAST\(([^()]+) AS DATE\)/gi, 'DATE($1)');
-  s = s.replace(/CAST\(([^()]+) AS TIME\)/gi, 'TIME($1)');
-  s = s.replace(/(\w+\.\w+|\w+)\s*\+\s*' '\s*\+\s*(\w+\.\w+|\w+)/g, "CONCAT($1, ' ', $2)");
-  const top = s.match(/SELECT TOP\s+\(?(\d+)\)?\s+/i);
-  if (top?.[1]) {
-    s = s.replace(/SELECT TOP\s+\(?(\d+)\)?\s+/i, 'SELECT ');
-    s = `${s.replace(/\s*;?\s*$/, '')} LIMIT ${top[1]}`;
-  }
-  s = s.replace(/@(\w+)/g, ':$1');
-  return s;
-}
-
-function applyUtcSession(target: Pool): void {
-  // mysql2 timezone 'Z' treats DATETIME as UTC. Align the MySQL session so
-  // CURRENT_TIMESTAMP / NOW() match UTC_TIMESTAMP() and JS Date values.
-  target.on('connection', (connection) => {
-    connection.query("SET time_zone = '+00:00'");
-  });
-}
-
-function poolOptions(includeDatabase: boolean): mysql.PoolOptions {
+export function sqlConfig(): SqlConfig {
   return {
-    host: env.DB_SERVER,
+    server: env.DB_SERVER,
     port: env.DB_PORT,
+    database: env.DB_NAME,
     user: env.DB_USER,
     password: env.DB_PASSWORD,
-    database: includeDatabase ? env.DB_NAME : undefined,
-    waitForConnections: true,
-    connectionLimit: 20,
-    namedPlaceholders: true,
-    dateStrings: false,
-    timezone: 'Z',
-    typeCast(field, next) {
-      if (field.type === 'TINY' && field.length === 1) {
-        return field.string() === '1';
-      }
-      // BIGINT PKs/FKs as strings so /bookings/1 matches JSON Id: "1"
-      if (field.type === 'LONGLONG') {
-        const v = field.string();
-        return v == null || v === '' ? null : v;
-      }
-      return next();
+    options: {
+      encrypt: Boolean(env.DB_ENCRYPT),
+      trustServerCertificate: true,
+      enableArithAbort: true,
+      useUTC: false,
     },
+    pool: { max: 20, min: 0, idleTimeoutMillis: 30_000 },
+    connectionTimeout: 15_000,
+    requestTimeout: 30_000,
   };
 }
 
-export async function getAdminPool(): Promise<Pool> {
-  const created = mysql.createPool(poolOptions(false));
-  applyUtcSession(created);
-  return created;
+/** Is DB ready */
+export function isDbReady(): boolean {
+  return pool?.connected === true;
 }
 
-export async function getPool(): Promise<Pool> {
-  if (pool) return pool;
-  const created = mysql.createPool(poolOptions(true));
-  applyUtcSession(created);
-  try {
-    const conn = await created.getConnection();
-    try {
-      await conn.query("SET time_zone = '+00:00'");
-    } finally {
-      conn.release();
+/** Bind request */
+function bind(request: sql.Request, inputs?: SqlInputs): sql.Request {
+  if (!inputs) return request;
+  for (const [key, value] of Object.entries(inputs)) {
+    if (value === undefined) continue;
+    if (value === null) {
+      request.input(key, sql.NVarChar, null);
+      continue;
     }
-  } catch (err) {
-    // Leave `pool` unset so the next call retries once MySQL is back up.
-    await created.end().catch(() => undefined);
-    throw err;
+    if (typeof value === 'boolean') {
+      request.input(key, sql.Bit, value);
+      continue;
+    }
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) request.input(key, sql.Int, value);
+      else request.input(key, sql.Float, value);
+      continue;
+    }
+    if (value instanceof Date) {
+      request.input(key, sql.DateTime, value);
+      continue;
+    }
+    request.input(key, sql.NVarChar(sql.MAX), String(value));
   }
-  pool = created;
-  logger.info({ server: env.DB_SERVER, port: env.DB_PORT, db: env.DB_NAME }, 'MySQL connected');
+  return request;
+}
+
+/** Get pool */
+export async function getPool(): Promise<sql.ConnectionPool> {
+  if (pool?.connected) return pool;
+  pool = await new sql.ConnectionPool(sqlConfig()).connect();
+  logger.info({ server: env.DB_SERVER, port: env.DB_PORT, db: env.DB_NAME }, 'SQL Server connected');
+  try {
+    const { ensureBookingSchema } = await import('../jobs/ensureSchema.js');
+    await ensureBookingSchema();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Could not create booking tables on CLIENT_API_LIVE (need CREATE TABLE). Login still uses dbo.users.',
+    );
+  }
   return pool;
 }
 
+/** Ping DB */
 export async function pingDb(): Promise<boolean> {
   try {
     const p = await getPool();
-    const conn = await p.getConnection();
-    try {
-      await conn.ping();
-    } finally {
-      conn.release();
-    }
+    await p.request().query('SELECT 1 AS ok');
     return true;
   } catch {
     return false;
   }
 }
 
+/** Close pool */
 export async function closePool(): Promise<void> {
   if (pool) {
-    await pool.end();
+    await pool.close();
     pool = null;
   }
 }
 
-/** mysql2's types omit the object form that `namedPlaceholders` accepts at runtime. */
-type BoundValues = Parameters<Pool['query']>[1];
-
-function normalizeInputs(inputs?: SqlInputs): SqlInputs | undefined {
-  if (!inputs) return undefined;
-  const out: SqlInputs = {};
-  for (const [key, value] of Object.entries(inputs)) {
-    if (value === undefined) continue;
-    out[key] = value;
-  }
-  return out;
+/** Run */
+async function run<T>(target: sql.ConnectionPool | sql.Transaction, text: string, inputs?: SqlInputs): Promise<T[]> {
+  const request = target instanceof sql.Transaction ? new sql.Request(target) : target.request();
+  bind(request, inputs);
+  const result = await request.query(text);
+  const rows = (result.recordset ?? []) as T[];
+  return rows;
 }
 
-async function run<T>(
-  target: Pool | PoolConnection,
-  text: string,
-  inputs?: SqlInputs,
-): Promise<T[]> {
-  const sql = translateSql(text);
-  const params = normalizeInputs(inputs);
-  const [rows] = await target.query<RowDataPacket[]>(sql, params as BoundValues);
-  return rows as T[];
+/** Missing booking table */
+export function isMissingTableError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Invalid object name/i.test(message);
 }
 
+/** Object name */
+export function missingObjectName(err: unknown): string | null {
+  const message = err instanceof Error ? err.message : String(err);
+  const match = message.match(/Invalid object name '([^']+)'/i);
+  return match?.[1] ?? null;
+}
+
+/** Query */
 export async function query<T>(text: string, inputs?: SqlInputs): Promise<T[]> {
   const p = await getPool();
   return run<T>(p, text, inputs);
 }
 
+/** Query returning [] when booking tables are not installed yet */
+export async function querySoft<T>(text: string, inputs?: SqlInputs): Promise<T[]> {
+  try {
+    return await query<T>(text, inputs);
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Booking table missing on CLIENT_API_LIVE — returning empty rows',
+      );
+      return [];
+    }
+    throw err;
+  }
+}
+
+/** Query one */
 export async function queryOne<T>(text: string, inputs?: SqlInputs): Promise<T | null> {
   const rows = await query<T>(text, inputs);
   return rows[0] ?? null;
 }
 
-export async function exec(text: string, inputs?: SqlInputs): Promise<ResultSetHeader> {
+/** Query one or null when booking tables are missing */
+export async function queryOneSoft<T>(text: string, inputs?: SqlInputs): Promise<T | null> {
+  const rows = await querySoft<T>(text, inputs);
+  return rows[0] ?? null;
+}
+
+/** Exec */
+export async function exec(text: string, inputs?: SqlInputs): Promise<{ rowsAffected: number }> {
   const p = await getPool();
-  const sql = translateSql(text);
-  const [result] = await p.query<ResultSetHeader>(sql, normalizeInputs(inputs) as BoundValues);
-  return result;
+  const request = bind(p.request(), inputs);
+  const result = await request.query(text);
+  const affected = Array.isArray(result.rowsAffected) ? result.rowsAffected[0] ?? 0 : 0;
+  return { rowsAffected: affected };
 }
 
-/** Insert a row and return the AUTO_INCREMENT Id as a string. */
+/** With inserted id */
+function withInsertedId(text: string): string {
+  const sqlText = text.trim().replace(/;?\s*$/, '');
+  if (/OUTPUT\s+INSERTED/i.test(sqlText)) return sqlText;
+  return sqlText.replace(/\)(\s*)VALUES/i, ') OUTPUT INSERTED.Id$1VALUES');
+}
+
+/** Insert */
 export async function insert(text: string, inputs?: SqlInputs): Promise<string> {
-  const result = await exec(text, inputs);
-  return String(result.insertId);
+  const rows = await query<{ Id: string | number }>(withInsertedId(text), inputs);
+  return String(rows[0]?.Id ?? '');
 }
 
+/** Tx query */
 export async function txQuery<T>(tx: DbTx, text: string, inputs?: SqlInputs): Promise<T[]> {
   return run<T>(tx, text, inputs);
 }
 
+/** Tx insert */
 export async function txInsert(tx: DbTx, text: string, inputs?: SqlInputs): Promise<string> {
-  const sql = translateSql(text);
-  const [result] = await tx.query<ResultSetHeader>(sql, normalizeInputs(inputs) as BoundValues);
-  return String(result.insertId);
+  const rows = await run<{ Id: string | number }>(tx, withInsertedId(text), inputs);
+  return String(rows[0]?.Id ?? '');
 }
 
+/** Tx query one */
 export async function txQueryOne<T>(tx: DbTx, text: string, inputs?: SqlInputs): Promise<T | null> {
   const rows = await txQuery<T>(tx, text, inputs);
   return rows[0] ?? null;
 }
 
+/** With transaction */
 export async function withTransaction<T>(
   fn: (tx: DbTx) => Promise<T>,
-  isolation: 'READ COMMITTED' | 'SERIALIZABLE' = 'READ COMMITTED',
+  isolation: 'READ COMMITTED' | 'SERIALIZABLE' | number = 'READ COMMITTED',
 ): Promise<T> {
   const p = await getPool();
-  const conn = await p.getConnection();
+  const tx = p.transaction();
+  const level =
+    isolation === 'SERIALIZABLE' || isolation === sql.ISOLATION_LEVEL.SERIALIZABLE
+      ? sql.ISOLATION_LEVEL.SERIALIZABLE
+      : sql.ISOLATION_LEVEL.READ_COMMITTED;
+  await tx.begin(level);
   try {
-    await conn.query(`SET TRANSACTION ISOLATION LEVEL ${isolation}`);
-    await conn.beginTransaction();
-    const result = await fn(conn);
-    await conn.commit();
+    const result = await fn(tx);
+    await tx.commit();
     return result;
   } catch (err) {
     try {
-      await conn.rollback();
+      await tx.rollback();
     } catch {
       /* already aborted */
     }
     throw err;
-  } finally {
-    conn.release();
   }
 }
 
-export const sql = { ISOLATION_LEVEL: { SERIALIZABLE: 'SERIALIZABLE' as const, READ_COMMITTED: 'READ COMMITTED' as const } };
+/** Sql driver */
+export const sqlDriver = sql;
+export { sql };
+/** Isolation */
+export const ISOLATION: { SERIALIZABLE: 'SERIALIZABLE'; READ_COMMITTED: 'READ COMMITTED' } = {
+  SERIALIZABLE: 'SERIALIZABLE' as const,
+  READ_COMMITTED: 'READ COMMITTED' as const,
+} as const;

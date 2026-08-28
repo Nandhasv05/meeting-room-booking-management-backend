@@ -2,6 +2,8 @@
 //VERSION : 1.0.0
 //DESCRIPTION : Constants for the booking system
 // DATE : 2026-08-26
+// DESCRIPTION : Constants for the booking system
+/** Booking statuses */
 export const BOOKING_STATUSES = [
   'DRAFT',
   'PENDING',
@@ -16,6 +18,7 @@ export const BOOKING_STATUSES = [
 
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
+/** Active booking statuses */
 export const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
   'PENDING',
   'APPROVED',
@@ -23,6 +26,7 @@ export const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
   'ONGOING',
 ];
 
+/** Event types */
 export const EVENT_TYPES = [
   'MEETING',
   'CONFERENCE',
@@ -37,6 +41,7 @@ export const EVENT_TYPES = [
 
 export type EventType = (typeof EVENT_TYPES)[number];
 
+/** Hall statuses */
 export const HALL_STATUSES = [
   'AVAILABLE',
   'BOOKED',
@@ -45,6 +50,7 @@ export const HALL_STATUSES = [
   'BLOCKED',
 ] as const;
 
+/** Hall types */
 export const HALL_TYPES = [
   'BOARDROOM',
   'AUDITORIUM',
@@ -54,6 +60,7 @@ export const HALL_TYPES = [
   'CONFERENCE',
 ] as const;
 
+/** Socket events */
 export const SOCKET_EVENTS = {
   BOOKING_CREATED: 'booking.created',
   BOOKING_UPDATED: 'booking.updated',
@@ -67,6 +74,7 @@ export const SOCKET_EVENTS = {
   NOTIFICATION: 'notification.created',
 } as const;
 
+/** Audit actions */
 export const AUDIT_ACTIONS = {
   LOGIN: 'Login',
   LOGOUT: 'Logout',

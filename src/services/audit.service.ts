@@ -1,6 +1,11 @@
+// AUTHOR : NANDHAKUMAR S V
+// DATE : 28/08/2026
+// DESCRIPTION : Audit log service
 import { query, queryOne } from '../config/database.js';
 import type { Paged } from '../types/index.js';
 
+
+/** List audit logs */
 export async function listAuditLogs(filters: {
   q?: string;
   module?: string;
@@ -32,14 +37,14 @@ export async function listAuditLogs(filters: {
   }
   const clause = where.join(' AND ');
   const total = await queryOne<{ Cnt: number }>(
-    `SELECT COUNT(*) AS Cnt FROM dbo.audit_logs a LEFT JOIN dbo.users u ON u.Id = a.UserId WHERE ${clause}`,
+    `SELECT COUNT(*) AS Cnt FROM dbo.audit_logs a LEFT JOIN dbo.users u ON CAST(u.Id AS nvarchar(64)) = CAST(a.UserId AS nvarchar(64)) WHERE ${clause}`,
     inputs,
   );
   const items = await query<Record<string, unknown>>(
-    `SELECT a.Id, a.UserId, CONCAT(u.FirstName, ' ', u.LastName) AS UserName, u.Email, a.Action, a.Module,
+    `SELECT a.Id, a.UserId, u.UserName AS UserName, u.Email, a.Action, a.Module,
             a.RecordId, a.OldValue, a.NewValue, a.IpAddress, a.CreatedAt
      FROM dbo.audit_logs a
-     LEFT JOIN dbo.users u ON u.Id = a.UserId
+     LEFT JOIN dbo.users u ON CAST(u.Id AS nvarchar(64)) = CAST(a.UserId AS nvarchar(64))
      WHERE ${clause}
      ORDER BY a.CreatedAt DESC
      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY`,

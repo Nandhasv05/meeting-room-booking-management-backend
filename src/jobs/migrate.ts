@@ -1,38 +1,27 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Migrate booking system
+// DATE : 2026-08-26
 import { logger } from '../config/logger.js';
-import { getAdminPool, closePool, getPool } from '../config/database.js';
+import { closePool, queryOne } from '../config/database.js';
+import { ensureBookingSchema } from './ensureSchema.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '../../../');
-
-function splitSql(raw: string): string[] {
-  return raw
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith('--'));
-}
-
+/** Main */
 async function main() {
-  const admin = await getAdminPool();
-  const schema = fs.readFileSync(path.join(root, 'database/schema.sql'), 'utf8');
-  for (const stmt of splitSql(schema)) {
-    await admin.query(stmt);
+  await ensureBookingSchema();
+  const halls = await queryOne<{ Id: number | null }>(`SELECT OBJECT_ID(N'dbo.conference_halls', N'U') AS Id`);
+  if (!halls?.Id) {
+    logger.fatal(
+      'CREATE TABLE is denied for client_api_user on CLIENT_API_LIVE. Run database/sqlserver/booking_schema.sql as db_owner, then grant_booking_tables.sql.',
+    );
+    await closePool();
+    process.exit(1);
   }
-  await admin.end();
-
-  const pool = await getPool();
-  const seeds = fs.readFileSync(path.join(root, 'database/seeds/001_lookups.sql'), 'utf8');
-  for (const stmt of splitSql(seeds)) {
-    if (/^USE\s+/i.test(stmt)) continue;
-    await pool.query(stmt);
-  }
-  logger.info('MySQL migration complete');
+  logger.info('BOOKING_SYSTEM_SCHEMA ready');
   await closePool();
 }
 
+/** Catch */
 main().catch((err) => {
   logger.fatal({ err }, 'migration failed');
   process.exit(1);

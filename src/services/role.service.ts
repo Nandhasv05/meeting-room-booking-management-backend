@@ -1,54 +1,57 @@
-import { query, queryOne, insert } from '../config/database.js';
+import { query, queryOne, querySoft, insert } from '../config/database.js';
 import { AppError } from '../utils/AppError.js';
+import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isTcsDepartment } from '../config/access.js';
 import type { AuthUser } from '../types/index.js';
 
 export async function listRoles() {
-  return query(
-    `SELECT r.Id, r.Code, r.Name, r.Description, r.IsSystem,
-            (SELECT COUNT(*) FROM dbo.users u WHERE u.RoleId = r.Id AND u.DeletedAt IS NULL) AS UserCount
-     FROM dbo.roles r
-     ORDER BY r.Name`,
-  );
+  const users = await query<{ Department: string | null }>(`SELECT Department FROM dbo.users`);
+  const tcs = users.filter((u) => isTcsDepartment(u.Department)).length;
+  return [
+    {
+      Id: 'ADMINISTRATOR',
+      Code: 'ADMINISTRATOR',
+      Name: 'Administrator',
+      Description: 'TCS department — full access',
+      IsSystem: true,
+      UserCount: tcs,
+    },
+    {
+      Id: 'EMPLOYEE',
+      Code: 'EMPLOYEE',
+      Name: 'Employee',
+      Description: 'All other departments',
+      IsSystem: true,
+      UserCount: users.length - tcs,
+    },
+  ];
 }
 
 export async function getRole(id: string) {
-  const role = await queryOne<{ Id: string; Code: string; Name: string; Description: string | null; IsSystem: boolean }>(
-    `SELECT Id, Code, Name, Description, IsSystem FROM dbo.roles WHERE Id = @Id`,
-    { Id: id },
-  );
+  const code = String(id).toUpperCase();
+  const roles = await listRoles();
+  const role = roles.find((r) => r.Code === code || r.Id === id);
   if (!role) throw new AppError('Role not found.', 404);
-  const permissions = await query<{ Id: string; Code: string; Name: string; Module: string }>(
-    `SELECT p.Id, p.Code, p.Name, p.Module
-     FROM dbo.role_permissions rp
-     JOIN dbo.permissions p ON p.Id = rp.PermissionId
-     WHERE rp.RoleId = @Id
-     ORDER BY p.Module, p.Code`,
-    { Id: id },
-  );
+  const codes = role.Code === 'ADMINISTRATOR' ? ADMIN_PERMISSIONS : EMPLOYEE_PERMISSIONS;
+  const permissions = codes.map((c) => ({ Id: c, Code: c, Name: c, Module: c.split('.')[0] ?? c }));
   return { ...role, permissions };
 }
 
 export async function listPermissions() {
-  return query(`SELECT Id, Code, Name, Module, Description FROM dbo.permissions ORDER BY Module, Code`);
+  return ADMIN_PERMISSIONS.map((c) => ({
+    Id: c,
+    Code: c,
+    Name: c,
+    Module: c.split('.')[0] ?? c,
+    Description: null,
+  }));
 }
 
-export async function setRolePermissions(_actor: AuthUser, roleId: string, permissionIds: string[]) {
-  const role = await getRole(roleId);
-  if (role.Code === 'ADMINISTRATOR') {
-    throw new AppError('Administrator permissions cannot be reduced.', 400);
-  }
-  await query(`DELETE FROM dbo.role_permissions WHERE RoleId = @RoleId`, { RoleId: roleId });
-  for (const permissionId of permissionIds) {
-    await query(
-      `INSERT INTO dbo.role_permissions (RoleId, PermissionId) VALUES (@RoleId, @PermissionId)`,
-      { RoleId: roleId, PermissionId: permissionId },
-    );
-  }
-  return getRole(roleId);
+export async function setRolePermissions(_actor: AuthUser, _roleId: string, _permissionIds: string[]) {
+  throw new AppError('Access is based on CLIENT_API_LIVE Department (TCS = full access).', 400);
 }
 
 export async function listDepartments(includeInactive = false) {
-  return query(
+  return querySoft(
     `SELECT Id, Code, Name, Description, IsActive, CreatedAt
      FROM dbo.departments
      WHERE DeletedAt IS NULL ${includeInactive ? '' : 'AND IsActive = 1'}

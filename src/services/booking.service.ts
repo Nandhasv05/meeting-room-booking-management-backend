@@ -1,4 +1,7 @@
-import { query, queryOne, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
+// AUTHOR : NANDHAKUMAR S V
+// DATE : 28/08/2026
+// DESCRIPTION : Booking service
+import { query, queryOne, querySoft, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
 import { AppError, ConflictError } from '../utils/AppError.js';
 import { bookingNumber, newQrToken } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
@@ -13,6 +16,7 @@ import type { Request } from 'express';
 
 type ConflictRow = { Id: string; BookingNumber: string; EventName: string; StartAt: Date; EndAt: Date; Status: string };
 
+/** Emit event */
 function emit(event: string, payload: Record<string, unknown>) {
   const io = getIo();
   if (!io) return;
@@ -24,6 +28,7 @@ function emit(event: string, payload: Record<string, unknown>) {
   io.to('calendar').emit(event, payload);
 }
 
+/** Get booking */
 async function getBooking(id: string): Promise<BookingRow> {
   const row = await queryOne<BookingRow>(
     `${BOOKING_SELECT} WHERE b.Id = @Id AND b.DeletedAt IS NULL`,
@@ -33,6 +38,7 @@ async function getBooking(id: string): Promise<BookingRow> {
   return row;
 }
 
+/** Get booking by ID */
 export async function getBookingById(id: string, user: AuthUser) {
   const booking = await getBooking(id);
   assertCanView(user, booking);
@@ -44,9 +50,9 @@ export async function getBookingById(id: string, user: AuthUser) {
   );
   const history = await query(
     `SELECT h.Id, h.FromStatus, h.ToStatus, h.Comment, h.CreatedAt,
-            CONCAT(u.FirstName, ' ', u.LastName) AS ActorName
+            u.UserName AS ActorName
      FROM dbo.booking_status_history h
-     LEFT JOIN dbo.users u ON u.Id = h.ActorId
+     LEFT JOIN dbo.users u ON CAST(u.Id AS nvarchar(64)) = CAST(h.ActorId AS nvarchar(64))
      WHERE h.BookingId = @Id
      ORDER BY h.CreatedAt`,
     { Id: id },
@@ -54,15 +60,18 @@ export async function getBookingById(id: string, user: AuthUser) {
   return { ...safe, facilities, history };
 }
 
+/** Assert can view */
 function assertCanView(user: AuthUser, booking: BookingRow) {
   if (user.permissions.includes('bookings.view_all') || booking.OrganizerId === user.id) return;
   throw new AppError('You cannot view this booking.', 403);
 }
 
+/** Assert can manage */
 function canManage(user: AuthUser, booking: Pick<BookingRow, 'OrganizerId'>) {
   return user.permissions.includes('bookings.view_all') || booking.OrganizerId === user.id;
 }
 
+/** Create booking input */
 export type CreateBookingInput = {
   eventName: string;
   eventType: string;
@@ -85,6 +94,7 @@ export type CreateBookingInput = {
   draft?: boolean;
 };
 
+/** Combine range */
 function combineRange(startAt: Date, endAt: Date) {
   if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) {
     throw new AppError('Invalid start time.');
@@ -93,6 +103,7 @@ function combineRange(startAt: Date, endAt: Date) {
   return { startAt, endAt, bookingDate: startAt.toISOString().slice(0, 10) };
 }
 
+/** Assert hall ready */
 async function assertHallReady(hallId: string, startAt: Date, endAt: Date, attendeeCount: number) {
   const hall = await queryOne<{
     Id: string;
@@ -123,6 +134,7 @@ async function assertHallReady(hallId: string, startAt: Date, endAt: Date, atten
   return hall;
 }
 
+/** Lock conflicts */
 async function lockConflicts(
   tx: DbTx,
   hallId: string,
@@ -132,16 +144,14 @@ async function lockConflicts(
 ) {
   const bookingConflict = await txQueryOne<ConflictRow>(
     tx,
-    `SELECT Id, BookingNumber, EventName, StartAt, EndAt, Status
-     FROM dbo.bookings
+    `SELECT TOP (1) Id, BookingNumber, EventName, StartAt, EndAt, Status
+     FROM dbo.bookings WITH (UPDLOCK, ROWLOCK)
      WHERE HallId = @HallId
        AND DeletedAt IS NULL
        AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')
        AND (@ExcludeBookingId IS NULL OR Id <> @ExcludeBookingId)
        AND StartAt < @EndAt
-       AND EndAt > @StartAt
-     LIMIT 1
-     FOR UPDATE`,
+       AND EndAt > @StartAt`,
     { HallId: hallId, StartAt: startAt, EndAt: endAt, ExcludeBookingId: excludeId ?? null },
   );
   if (bookingConflict) {
@@ -149,15 +159,13 @@ async function lockConflicts(
   }
   const maint = await txQueryOne(
     tx,
-    `SELECT Id, Title, StartAt, EndAt, Status
-     FROM dbo.hall_maintenance
+    `SELECT TOP (1) Id, Title, StartAt, EndAt, Status
+     FROM dbo.hall_maintenance WITH (UPDLOCK, ROWLOCK)
      WHERE HallId = @HallId
        AND DeletedAt IS NULL
        AND Status IN (N'SCHEDULED', N'IN_PROGRESS')
        AND StartAt < @EndAt
-       AND EndAt > @StartAt
-     LIMIT 1
-     FOR UPDATE`,
+       AND EndAt > @StartAt`,
     { HallId: hallId, StartAt: startAt, EndAt: endAt },
   );
   if (maint) {
@@ -165,6 +173,7 @@ async function lockConflicts(
   }
 }
 
+/** Record history */
 async function recordHistory(
   tx: DbTx,
   bookingId: string,
@@ -187,6 +196,7 @@ async function recordHistory(
   );
 }
 
+/** Create booking */
 export async function createBooking(user: AuthUser, input: CreateBookingInput, req: Request) {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);
@@ -305,10 +315,8 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
   });
 
   const managers = await query<{ Id: string }>(
-    `SELECT u.Id FROM dbo.users u
-     JOIN dbo.roles r ON r.Id = u.RoleId
-     WHERE u.DeletedAt IS NULL AND u.Status = N'ACTIVE'
-       AND r.Code IN (N'HALL_MANAGER', N'ADMINISTRATOR')`,
+    `SELECT CAST(u.Id AS nvarchar(64)) AS Id FROM dbo.users u
+     WHERE UPPER(LTRIM(RTRIM(ISNULL(u.Department, N'')))) = N'TCS'`,
   );
   await notify({
     userId: organizerId,
@@ -373,6 +381,7 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
   return { ...(await getBookingById(id, user)), inviteMail };
 }
 
+/** Update booking */
 export async function updateBooking(user: AuthUser, id: string, input: Partial<CreateBookingInput>, req: Request) {
   const existing = await getBooking(id);
   if (!canManage(user, existing)) throw new AppError('You cannot edit this booking.', 403);
@@ -450,6 +459,7 @@ export async function updateBooking(user: AuthUser, id: string, input: Partial<C
   return getBookingById(id, user);
 }
 
+/** Cancel booking */
 export async function cancelBooking(user: AuthUser, id: string, reason: string | undefined, req: Request) {
   const existing = await getBooking(id);
   if (!canManage(user, existing)) throw new AppError('You cannot cancel this booking.', 403);
@@ -527,6 +537,7 @@ export async function cancelBooking(user: AuthUser, id: string, reason: string |
   return getBookingById(id, user);
 }
 
+/** Delete booking */
 export async function deleteBooking(user: AuthUser, id: string, req: Request) {
   const existing = await getBooking(id);
   if (!canManage(user, existing)) throw new AppError('You cannot delete this booking.', 403);
@@ -572,6 +583,7 @@ export async function deleteBooking(user: AuthUser, id: string, req: Request) {
   });
 }
 
+/** Approve booking */
 export async function approveBooking(user: AuthUser, id: string, comment: string | undefined, req: Request) {
   const existing = await getBooking(id);
   if (existing.Status !== 'PENDING' && existing.Status !== 'APPROVED') {
@@ -613,6 +625,7 @@ export async function approveBooking(user: AuthUser, id: string, comment: string
   return getBookingById(id, user);
 }
 
+/** Reject booking */
 export async function rejectBooking(user: AuthUser, id: string, reason: string, req: Request) {
   const existing = await getBooking(id);
   if (existing.Status !== 'PENDING') throw new AppError('Only pending bookings can be rejected.');
@@ -652,6 +665,7 @@ export async function rejectBooking(user: AuthUser, id: string, reason: string, 
   return getBookingById(id, user);
 }
 
+/** List bookings */
 export async function listBookings(
   user: AuthUser,
   filters: {
@@ -679,7 +693,7 @@ export async function listBookings(
   if (tab === 'upcoming') {
     where.push(`b.Status IN (N'PENDING', N'APPROVED', N'CONFIRMED') AND b.StartAt > SYSUTCDATETIME()`);
   } else if (tab === 'today') {
-    where.push(`DATE(DATE_ADD(b.StartAt, INTERVAL 330 MINUTE)) = @Today AND b.Status NOT IN (N'CANCELLED', N'REJECTED')`);
+    where.push(`CAST(DATEADD(MINUTE, 330, b.StartAt) AS DATE) = @Today AND b.Status NOT IN (N'CANCELLED', N'REJECTED')`);
     inputs.Today = todayInAppTz();
   } else if (tab === 'ongoing') {
     where.push(`b.Status = N'ONGOING'`);
@@ -718,21 +732,23 @@ export async function listBookings(
   const total = await queryOne<{ Cnt: number }>(
     `SELECT COUNT(*) AS Cnt FROM dbo.bookings b JOIN dbo.conference_halls h ON h.Id = b.HallId WHERE ${clause}`,
     inputs,
-  );
-  const items = await query<BookingRow>(
+  ).catch(() => ({ Cnt: 0 }));
+  const items = await querySoft<BookingRow>(
     `${BOOKING_SELECT} WHERE ${clause} ORDER BY b.StartAt DESC OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY`,
     inputs,
   );
   return { items: items.map(omitQr), page: filters.page, pageSize: filters.pageSize, total: total?.Cnt ?? 0 };
 }
 
+/** List approvals */
 export async function listApprovals() {
-  const rows = await query<BookingRow>(
+  const rows = await querySoft<BookingRow>(
     `${BOOKING_SELECT} WHERE b.DeletedAt IS NULL AND b.Status = N'PENDING' ORDER BY b.StartAt`,
   );
   return rows.map(omitQr);
 }
 
+/** Calendar events */
 export async function calendarEvents(from: string, to: string, hallId?: string) {
   const inputs: Record<string, unknown> = { From: new Date(from), To: new Date(to) };
   let hallFilter = '';
@@ -740,7 +756,7 @@ export async function calendarEvents(from: string, to: string, hallId?: string) 
     hallFilter = 'AND b.HallId = @HallId';
     inputs.HallId = hallId;
   }
-  const bookings = await query(
+  const bookings = await querySoft(
     `SELECT b.Id, b.EventName, b.StartAt, b.EndAt, b.Status, h.Name AS HallName, h.Code AS HallCode, h.Id AS HallId
      FROM dbo.bookings b
      JOIN dbo.conference_halls h ON h.Id = b.HallId
@@ -748,7 +764,7 @@ export async function calendarEvents(from: string, to: string, hallId?: string) 
        AND b.StartAt < @To AND b.EndAt > @From ${hallFilter}`,
     inputs,
   );
-  const maintenance = await query(
+  const maintenance = await querySoft(
     `SELECT m.Id, m.Title AS EventName, m.StartAt, m.EndAt, N'MAINTENANCE' AS Status,
             h.Name AS HallName, h.Code AS HallCode, h.Id AS HallId
      FROM dbo.hall_maintenance m
@@ -760,6 +776,7 @@ export async function calendarEvents(from: string, to: string, hallId?: string) 
   return { bookings, maintenance };
 }
 
+/** Transition due bookings */
 export async function transitionDueBookings(): Promise<void> {
   const starting = await query<BookingRow>(
     `${BOOKING_SELECT}

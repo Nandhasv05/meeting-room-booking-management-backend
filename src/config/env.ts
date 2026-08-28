@@ -7,15 +7,17 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** Here */
 const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../.env') });
 dotenv.config({ path: path.resolve(here, '../../.env') });
 
+/** Schema */
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(5000),
   DB_SERVER: z.string().min(1),
-  DB_PORT: z.coerce.number().default(3306),
+  DB_PORT: z.coerce.number().default(1433),
   DB_NAME: z.string().min(1),
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
@@ -27,20 +29,11 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v !== 'false'),
-  CLIENT_API_SERVER: z.string().optional().default(''),
-  CLIENT_API_PORT: z.coerce.number().default(1433),
-  CLIENT_API_DATABASE: z.string().optional().default(''),
-  CLIENT_API_USER: z.string().optional().default(''),
-  CLIENT_API_PASSWORD: z.string().optional().default(''),
-  CLIENT_API_ENCRYPT: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true'),
+  DIRECTORY_DEFAULT_PASSWORD: z.string().min(1).default('Password#123'),
   JWT_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES: z.string().default('15m'),
   JWT_REFRESH_EXPIRES: z.string().default('7d'),
-  BCRYPT_ROUNDS: z.coerce.number().default(12),
   FRONTEND_URL: z.string().default('http://10.103.10.33'),
   API_URL: z.string().default('http://10.103.10.33/api'),
   API_CRYPTO_KEY: z.string().min(8).default('MeetingHallApiKey'),
@@ -53,11 +46,15 @@ const schema = z.object({
   MAX_UPLOAD_MB: z.coerce.number().default(5),
 });
 
+/** Parsed */
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
   const missing = parsed.error.issues.map((i) => i.path.join('.')).join(', ');
   throw new Error(`Invalid environment: ${missing}`);
 }
 
+/** Env */
 export const env = parsed.data;
+
+/** Is production */
 export const isProd = env.NODE_ENV === 'production';

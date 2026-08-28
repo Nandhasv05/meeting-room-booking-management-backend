@@ -1,3 +1,7 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Display service
+// DATE : 2026-08-26
 import { query, queryOne } from '../config/database.js';
 import { getClientApiNow } from '../config/clientApi.js';
 import { getHallByCode } from './hall.service.js';
@@ -5,11 +9,13 @@ import { BOOKING_SELECT, omitQr, type BookingRow } from '../types/db.js';
 
 export type DisplayState = 'AVAILABLE' | 'UPCOMING' | 'ONGOING' | 'MAINTENANCE';
 
+/** Get display */
 export async function getDisplay(hallCode: string) {
   const hall = await getHallByCode(hallCode);
   const now = await getClientApiNow();
   const clock = { HallId: hall.Id, Now: now };
 
+  /** Maintenance */
   const maintenance = await queryOne<{ Title: string; EndAt: Date }>(
     `SELECT Title, EndAt FROM dbo.hall_maintenance
      WHERE HallId = @HallId AND DeletedAt IS NULL
@@ -18,7 +24,8 @@ export async function getDisplay(hallCode: string) {
     clock,
   );
 
-  if (hall.Status === 'BLOCKED' || hall.Status === 'MAINTENANCE' || maintenance) {
+  /** Maintenance */
+if (hall.Status === 'BLOCKED' || hall.Status === 'MAINTENANCE' || maintenance) {
     return {
       hallName: hall.Name,
       hallCode: hall.Code,
@@ -32,6 +39,7 @@ export async function getDisplay(hallCode: string) {
     };
   }
 
+  /** Current */
   const current = await queryOne<BookingRow>(
     `${BOOKING_SELECT}
      WHERE b.HallId = @HallId AND b.DeletedAt IS NULL
@@ -40,6 +48,7 @@ export async function getDisplay(hallCode: string) {
     clock,
   );
 
+  /** Next */
   const next = await queryOne<BookingRow>(
     `${BOOKING_SELECT}
      WHERE b.HallId = @HallId AND b.DeletedAt IS NULL
@@ -49,6 +58,7 @@ export async function getDisplay(hallCode: string) {
     clock,
   );
 
+  /** Ongoing */
   if (current) {
     const ongoing = current.Status === 'ONGOING' || now >= new Date(current.StartAt);
     if (ongoing) {
@@ -66,6 +76,7 @@ export async function getDisplay(hallCode: string) {
     }
   }
 
+  /** Soon */
   if (next) {
     const soon = new Date(next.StartAt).getTime() - now.getTime() < 4 * 60 * 60 * 1000;
     if (soon || new Date(next.StartAt).toDateString() === now.toDateString()) {
@@ -83,6 +94,7 @@ export async function getDisplay(hallCode: string) {
     }
   }
 
+  /** Available */
   return {
     hallName: hall.Name,
     hallCode: hall.Code,

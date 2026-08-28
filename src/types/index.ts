@@ -8,6 +8,7 @@ export type AuthUser = {
   roleCode: string;
   roleName: string;
   departmentId: string | null;
+  departmentName: string | null;
   permissions: string[];
 };
 
