@@ -5,7 +5,7 @@ import * as halls from '../services/hall.service.js';
 import * as maint from '../services/maintenance.service.js';
 
 export const listHalls = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await halls.listHalls(req.query as Record<string, string>));
+  ok(res, await halls.listHalls((req.body ?? {}) as Record<string, string>));
 });
 
 export const getHall = asyncHandler(async (req: Request, res: Response) => {
@@ -30,8 +30,8 @@ export const availability = asyncHandler(async (req: Request, res: Response) => 
     res,
     await halls.hallAvailability(
       req.params.id as string,
-      String(req.query.from),
-      String(req.query.to),
+      String(req.body?.from ?? ''),
+      String(req.body?.to ?? ''),
     ),
   );
 });
@@ -54,7 +54,7 @@ export const deleteFacility = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const listMaintenance = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await maint.listMaintenance(req.query.hallId as string | undefined));
+  ok(res, await maint.listMaintenance(req.body?.hallId as string | undefined));
 });
 
 export const createMaintenance = asyncHandler(async (req: Request, res: Response) => {

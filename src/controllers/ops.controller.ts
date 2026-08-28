@@ -18,31 +18,32 @@ export const display = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const reportBookings = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await reports.bookingReport(req.query as Record<string, string>));
+  ok(res, await reports.bookingReport((req.body ?? {}) as Record<string, string>));
 });
 
 export const reportUtilization = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await reports.utilizationReport(req.query as Record<string, string>));
+  ok(res, await reports.utilizationReport((req.body ?? {}) as Record<string, string>));
 });
 
 export const reportDepartments = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await reports.departmentReport(req.query as Record<string, string>));
+  ok(res, await reports.departmentReport((req.body ?? {}) as Record<string, string>));
 });
 
 export const reportCancellations = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await reports.cancellationReport(req.query as Record<string, string>));
+  ok(res, await reports.cancellationReport((req.body ?? {}) as Record<string, string>));
 });
 
 export const reportPeak = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await reports.peakHoursReport(req.query as Record<string, string>));
+  ok(res, await reports.peakHoursReport((req.body ?? {}) as Record<string, string>));
 });
 
 export const reportExport = asyncHandler(async (req: Request, res: Response) => {
-  await reports.exportReport(String(req.query.type), String(req.query.format ?? 'xlsx'), req.query as Record<string, string>, res);
+  const filters = (req.body ?? {}) as Record<string, string>;
+  await reports.exportReport(String(filters.type), String(filters.format ?? 'xlsx'), filters, res);
 });
 
 export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const items = await notif.listNotifications(req.user!, req.query.unread === 'true');
+  const items = await notif.listNotifications(req.user!, req.body?.unread === true || req.body?.unread === 'true');
   const unread = await notif.unreadCount(req.user!);
   ok(res, { items, unread });
 });
@@ -74,12 +75,12 @@ export const auditLogs = asyncHandler(async (req: Request, res: Response) => {
   ok(
     res,
     await audit.listAuditLogs({
-      q: req.query.q as string | undefined,
-      module: req.query.module as string | undefined,
-      from: req.query.from as string | undefined,
-      to: req.query.to as string | undefined,
-      page: Number(req.query.page ?? 1),
-      pageSize: Number(req.query.pageSize ?? 30),
+      q: req.body?.q as string | undefined,
+      module: req.body?.module as string | undefined,
+      from: req.body?.from as string | undefined,
+      to: req.body?.to as string | undefined,
+      page: Number(req.body?.page ?? 1),
+      pageSize: Number(req.body?.pageSize ?? 30),
     }),
   );
 });

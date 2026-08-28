@@ -45,6 +45,14 @@ export function translateSql(sql: string): string {
   return s;
 }
 
+function applyUtcSession(target: Pool): void {
+  // mysql2 timezone 'Z' treats DATETIME as UTC. Align the MySQL session so
+  // CURRENT_TIMESTAMP / NOW() match UTC_TIMESTAMP() and JS Date values.
+  target.on('connection', (connection) => {
+    connection.query("SET time_zone = '+00:00'");
+  });
+}
+
 function poolOptions(includeDatabase: boolean): mysql.PoolOptions {
   return {
     host: env.DB_SERVER,
@@ -72,15 +80,22 @@ function poolOptions(includeDatabase: boolean): mysql.PoolOptions {
 }
 
 export async function getAdminPool(): Promise<Pool> {
-  return mysql.createPool(poolOptions(false));
+  const created = mysql.createPool(poolOptions(false));
+  applyUtcSession(created);
+  return created;
 }
 
 export async function getPool(): Promise<Pool> {
   if (pool) return pool;
   const created = mysql.createPool(poolOptions(true));
+  applyUtcSession(created);
   try {
     const conn = await created.getConnection();
-    conn.release();
+    try {
+      await conn.query("SET time_zone = '+00:00'");
+    } finally {
+      conn.release();
+    }
   } catch (err) {
     // Leave `pool` unset so the next call retries once MySQL is back up.
     await created.end().catch(() => undefined);

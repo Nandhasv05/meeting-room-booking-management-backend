@@ -7,6 +7,7 @@ import { getIo } from '../sockets/registry.js';
 import { notify, notifyMany } from './notification.service.js';
 import { sendCancellationCard, sendMeetingInvites, type InvitationCard } from './email.service.js';
 import { BOOKING_SELECT, omitQr, type BookingRow } from '../types/db.js';
+import { todayInAppTz } from '../utils/clock.js';
 import type { AuthUser, Paged } from '../types/index.js';
 import type { Request } from 'express';
 
@@ -678,7 +679,8 @@ export async function listBookings(
   if (tab === 'upcoming') {
     where.push(`b.Status IN (N'PENDING', N'APPROVED', N'CONFIRMED') AND b.StartAt > SYSUTCDATETIME()`);
   } else if (tab === 'today') {
-    where.push(`CAST(b.StartAt AS DATE) = CAST(SYSUTCDATETIME() AS DATE) AND b.Status NOT IN (N'CANCELLED', N'REJECTED')`);
+    where.push(`DATE(DATE_ADD(b.StartAt, INTERVAL 330 MINUTE)) = @Today AND b.Status NOT IN (N'CANCELLED', N'REJECTED')`);
+    inputs.Today = todayInAppTz();
   } else if (tab === 'ongoing') {
     where.push(`b.Status = N'ONGOING'`);
   } else if (tab === 'completed') {

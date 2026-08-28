@@ -9,15 +9,15 @@ export const listBookings = asyncHandler(async (req: Request, res: Response) => 
   ok(
     res,
     await bookings.listBookings(req.user!, {
-      tab: req.query.tab as string | undefined,
-      hallId: req.query.hallId as string | undefined,
-      status: req.query.status as string | undefined,
-      departmentId: req.query.departmentId as string | undefined,
-      from: req.query.from as string | undefined,
-      to: req.query.to as string | undefined,
-      q: req.query.q as string | undefined,
-      page: Number(req.query.page ?? 1),
-      pageSize: Number(req.query.pageSize ?? 20),
+      tab: req.body?.tab as string | undefined,
+      hallId: req.body?.hallId as string | undefined,
+      status: req.body?.status as string | undefined,
+      departmentId: req.body?.departmentId as string | undefined,
+      from: req.body?.from as string | undefined,
+      to: req.body?.to as string | undefined,
+      q: req.body?.q as string | undefined,
+      page: Number(req.body?.page ?? 1),
+      pageSize: Number(req.body?.pageSize ?? 20),
     }),
   );
 });
@@ -58,12 +58,12 @@ export const listApprovals = asyncHandler(async (_req: Request, res: Response) =
 export const calendar = asyncHandler(async (req: Request, res: Response) => {
   ok(
     res,
-    await bookings.calendarEvents(String(req.query.from), String(req.query.to), req.query.hallId as string | undefined),
+    await bookings.calendarEvents(String(req.body?.from ?? ''), String(req.body?.to ?? ''), req.body?.hallId as string | undefined),
   );
 });
 
 export const listEvents = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await events.listEvents(req.user!, req.query as Record<string, string>));
+  ok(res, await events.listEvents(req.user!, (req.body ?? {}) as Record<string, string>));
 });
 
 export const getEvent = asyncHandler(async (req: Request, res: Response) => {

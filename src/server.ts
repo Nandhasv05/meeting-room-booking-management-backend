@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { getPool, closePool, isDbReady } from './config/database.js';
+import { closeClientApiPool } from './config/clientApi.js';
 import { attachSockets } from './sockets/index.js';
 import { startScheduler } from './jobs/scheduler.js';
 import { hydrateMailFromEnv } from './services/settings.service.js';
@@ -56,6 +57,7 @@ async function main() {
     logger.info('Shutting down');
     server.close();
     await closePool();
+    await closeClientApiPool();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());

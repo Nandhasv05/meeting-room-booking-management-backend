@@ -1,6 +1,8 @@
 import { query, queryOne } from '../config/database.js';
+import { todayInAppTz } from '../utils/clock.js';
 
 export async function getDashboard() {
+  const today = todayInAppTz();
   const stats = await queryOne<{
     TotalHalls: number;
     AvailableHalls: number;
@@ -20,19 +22,19 @@ export async function getDashboard() {
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND IsActive = 1 AND Status = N'AVAILABLE') AS AvailableHalls,
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND Status IN (N'OCCUPIED', N'BOOKED')) AS OccupiedHalls,
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND Status = N'MAINTENANCE') AS MaintenanceHalls,
-      (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND DATE(StartAt) = DATE(SYSUTCDATETIME())
+      (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND DATE(DATE_ADD(StartAt, INTERVAL 330 MINUTE)) = @Today
          AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')) AS TodayBookings,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status IN (N'CONFIRMED', N'APPROVED') AND StartAt > SYSUTCDATETIME()) AS UpcomingEvents,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status = N'PENDING') AS PendingApprovals,
       (SELECT COALESCE(SUM(AttendeeCount), 0) FROM dbo.bookings WHERE DeletedAt IS NULL
-         AND DATE(StartAt) = DATE(SYSUTCDATETIME())
+         AND DATE(DATE_ADD(StartAt, INTERVAL 330 MINUTE)) = @Today
          AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')) AS AttendeesToday,
       (SELECT COUNT(*) FROM dbo.users WHERE DeletedAt IS NULL) AS TotalUsers,
       (SELECT COUNT(*) FROM dbo.users WHERE DeletedAt IS NULL AND Status = N'ACTIVE') AS ActiveUsers,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status = N'CANCELLED'
          AND CreatedAt >= DATEADD(DAY, -30, SYSUTCDATETIME())) AS CancelledLast30,
       (SELECT COUNT(*) FROM dbo.departments WHERE IsActive = 1) AS Departments
-  `);
+  `, { Today: today });
 
   const utilization = await query<{ HallName: string; HoursBooked: number }>(`
     SELECT h.Name AS HallName,
@@ -89,11 +91,11 @@ export async function getDashboard() {
     FROM dbo.bookings b
     JOIN dbo.conference_halls h ON h.Id = b.HallId
     JOIN dbo.users o ON o.Id = b.OrganizerId
-    WHERE b.DeletedAt IS NULL AND DATE(b.StartAt) = DATE(SYSUTCDATETIME())
+    WHERE b.DeletedAt IS NULL AND DATE(DATE_ADD(b.StartAt, INTERVAL 330 MINUTE)) = @Today
       AND b.Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
     ORDER BY b.StartAt
     LIMIT 12
-  `);
+  `, { Today: today });
 
   const upcoming = await query(`
     SELECT b.Id, b.EventName, b.StartAt, b.EndAt, b.Status, h.Name AS HallName,

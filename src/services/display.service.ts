@@ -1,4 +1,5 @@
 import { query, queryOne } from '../config/database.js';
+import { getClientApiNow } from '../config/clientApi.js';
 import { getHallByCode } from './hall.service.js';
 import { BOOKING_SELECT, omitQr, type BookingRow } from '../types/db.js';
 
@@ -6,14 +7,15 @@ export type DisplayState = 'AVAILABLE' | 'UPCOMING' | 'ONGOING' | 'MAINTENANCE';
 
 export async function getDisplay(hallCode: string) {
   const hall = await getHallByCode(hallCode);
-  const now = new Date();
+  const now = await getClientApiNow();
+  const clock = { HallId: hall.Id, Now: now };
 
   const maintenance = await queryOne<{ Title: string; EndAt: Date }>(
     `SELECT Title, EndAt FROM dbo.hall_maintenance
      WHERE HallId = @HallId AND DeletedAt IS NULL
        AND Status IN (N'SCHEDULED', N'IN_PROGRESS')
-       AND StartAt <= SYSUTCDATETIME() AND EndAt > SYSUTCDATETIME()`,
-    { HallId: hall.Id },
+       AND StartAt <= @Now AND EndAt > @Now`,
+    clock,
   );
 
   if (hall.Status === 'BLOCKED' || hall.Status === 'MAINTENANCE' || maintenance) {
@@ -26,6 +28,7 @@ export async function getDisplay(hallCode: string) {
       availableFrom: maintenance?.EndAt ?? null,
       current: null,
       next: null,
+      serverNow: now.toISOString(),
     };
   }
 
@@ -33,17 +36,17 @@ export async function getDisplay(hallCode: string) {
     `${BOOKING_SELECT}
      WHERE b.HallId = @HallId AND b.DeletedAt IS NULL
        AND b.Status IN (N'ONGOING', N'CONFIRMED', N'APPROVED')
-       AND b.StartAt <= SYSUTCDATETIME() AND b.EndAt > SYSUTCDATETIME()`,
-    { HallId: hall.Id },
+       AND b.StartAt <= @Now AND b.EndAt > @Now`,
+    clock,
   );
 
   const next = await queryOne<BookingRow>(
     `${BOOKING_SELECT}
      WHERE b.HallId = @HallId AND b.DeletedAt IS NULL
        AND b.Status IN (N'CONFIRMED', N'APPROVED', N'PENDING', N'ONGOING')
-       AND b.StartAt > SYSUTCDATETIME()
+       AND b.StartAt > @Now
      ORDER BY b.StartAt OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`,
-    { HallId: hall.Id },
+    clock,
   );
 
   if (current) {
@@ -58,6 +61,7 @@ export async function getDisplay(hallCode: string) {
         availableFrom: null,
         current: omitQr(current),
         next: next ? omitQr(next) : null,
+        serverNow: now.toISOString(),
       };
     }
   }
@@ -74,6 +78,7 @@ export async function getDisplay(hallCode: string) {
         availableFrom: null,
         current: null,
         next: next ? omitQr(next) : null,
+        serverNow: now.toISOString(),
       };
     }
   }
@@ -87,5 +92,6 @@ export async function getDisplay(hallCode: string) {
     availableFrom: null,
     current: null,
     next: next ? omitQr(next) : null,
+    serverNow: now.toISOString(),
   };
 }

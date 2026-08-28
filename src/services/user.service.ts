@@ -6,6 +6,11 @@ import { AUDIT_ACTIONS } from '../config/constants.js';
 import type { Request } from 'express';
 import type { AuthUser, Paged } from '../types/index.js';
 import type { UserRow } from '../types/db.js';
+import {
+  isClientApiConfigured,
+  listClientApiUsers,
+  searchClientApiUsers,
+} from './clientApiUsers.js';
 
 const USER_SELECT = `
   SELECT u.Id, u.EmployeeId, u.FirstName, u.LastName, u.Email, u.Phone, u.DepartmentId,
@@ -24,6 +29,9 @@ export async function listUsers(filters: {
   page: number;
   pageSize: number;
 }): Promise<Paged<UserRow>> {
+  if (isClientApiConfigured()) {
+    return listClientApiUsers(filters);
+  }
   const where: string[] = ['u.DeletedAt IS NULL'];
   const inputs: Record<string, unknown> = {
     Offset: (filters.page - 1) * filters.pageSize,
@@ -186,6 +194,9 @@ export async function resetPassword(actor: AuthUser, id: string, password: strin
 }
 
 export async function searchEmployees(q: string) {
+  if (isClientApiConfigured()) {
+    return searchClientApiUsers(q);
+  }
   return query<UserRow>(
     `${USER_SELECT}
      WHERE u.DeletedAt IS NULL AND u.Status = N'ACTIVE'

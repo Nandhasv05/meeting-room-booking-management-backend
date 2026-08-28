@@ -1,6 +1,7 @@
 import { query, queryOne, insert } from '../config/database.js';
 import { getIo } from '../sockets/registry.js';
 import { SOCKET_EVENTS } from '../config/constants.js';
+import { logger } from '../config/logger.js';
 import type { AuthUser } from '../types/index.js';
 
 export type NotificationType =
@@ -22,8 +23,8 @@ export async function notify(input: {
   relatedId?: string;
 }): Promise<void> {
   const id = await insert(
-    `INSERT INTO dbo.notifications (UserId, Type, Title, Message, RelatedModule, RelatedId)
-     VALUES (@UserId, @Type, @Title, @Message, @RelatedModule, @RelatedId)`,
+    `INSERT INTO dbo.notifications (UserId, Type, Title, Message, RelatedModule, RelatedId, CreatedAt)
+     VALUES (@UserId, @Type, @Title, @Message, @RelatedModule, @RelatedId, SYSUTCDATETIME())`,
     {
       UserId: input.userId,
       Type: input.type,
@@ -45,13 +46,18 @@ export async function notifyMany(
 }
 
 export async function listNotifications(user: AuthUser, unreadOnly = false) {
-  return query(
-    `SELECT Id, Type, Title, Message, IsRead, RelatedModule, RelatedId, CreatedAt
-     FROM dbo.notifications
-     WHERE UserId = @UserId ${unreadOnly ? 'AND IsRead = 0' : ''}
-     ORDER BY CreatedAt DESC OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY`,
-    { UserId: user.id },
-  );
+  try {
+    return await query(
+      `SELECT Id, Type, Title, Message, IsRead, RelatedModule, RelatedId, CreatedAt
+       FROM dbo.notifications
+       WHERE UserId = @UserId ${unreadOnly ? 'AND IsRead = 0' : ''}
+       ORDER BY CreatedAt DESC OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY`,
+      { UserId: user.id },
+    );
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'listNotifications failed');
+    return [];
+  }
 }
 
 export async function markRead(user: AuthUser, id: string): Promise<void> {
@@ -68,11 +74,16 @@ export async function markAllRead(user: AuthUser): Promise<void> {
 }
 
 export async function unreadCount(user: AuthUser): Promise<number> {
-  const row = await queryOne<{ Cnt: number }>(
-    `SELECT COUNT(*) AS Cnt FROM dbo.notifications WHERE UserId = @UserId AND IsRead = 0`,
-    { UserId: user.id },
-  );
-  return row?.Cnt ?? 0;
+  try {
+    const row = await queryOne<{ Cnt: number }>(
+      `SELECT COUNT(*) AS Cnt FROM dbo.notifications WHERE UserId = @UserId AND IsRead = 0`,
+      { UserId: user.id },
+    );
+    return row?.Cnt ?? 0;
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'unreadCount failed');
+    return 0;
+  }
 }
 
 export { sendEmail } from './email.service.js';

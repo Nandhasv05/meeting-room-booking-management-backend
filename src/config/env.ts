@@ -27,6 +27,15 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v !== 'false'),
+  CLIENT_API_SERVER: z.string().optional().default(''),
+  CLIENT_API_PORT: z.coerce.number().default(1433),
+  CLIENT_API_DATABASE: z.string().optional().default(''),
+  CLIENT_API_USER: z.string().optional().default(''),
+  CLIENT_API_PASSWORD: z.string().optional().default(''),
+  CLIENT_API_ENCRYPT: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   JWT_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES: z.string().default('15m'),
@@ -34,6 +43,7 @@ const schema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().default(12),
   FRONTEND_URL: z.string().default('http://10.103.10.33'),
   API_URL: z.string().default('http://10.103.10.33/api'),
+  API_CRYPTO_KEY: z.string().min(8).default('MeetingHallApiKey'),
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),

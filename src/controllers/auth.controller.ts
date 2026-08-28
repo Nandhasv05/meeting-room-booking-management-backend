@@ -26,12 +26,12 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
 
 export const listUsers = asyncHandler(async (req: Request, res: Response) => {
   const data = await users.listUsers({
-    q: String(req.query.q ?? ''),
-    departmentId: req.query.departmentId as string | undefined,
-    roleId: req.query.roleId as string | undefined,
-    status: req.query.status as string | undefined,
-    page: Number(req.query.page ?? 1),
-    pageSize: Number(req.query.pageSize ?? 20),
+    q: String(req.body?.q ?? ''),
+    departmentId: req.body?.departmentId as string | undefined,
+    roleId: req.body?.roleId as string | undefined,
+    status: req.body?.status as string | undefined,
+    page: Number(req.body?.page ?? 1),
+    pageSize: Number(req.body?.pageSize ?? 20),
   });
   ok(res, data);
 });
@@ -54,7 +54,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const searchEmployees = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await users.searchEmployees(String(req.query.q ?? '')));
+  ok(res, await users.searchEmployees(String(req.body?.q ?? '')));
 });
 
 export const listRoles = asyncHandler(async (_req: Request, res: Response) => {
@@ -74,7 +74,7 @@ export const listPermissions = asyncHandler(async (_req: Request, res: Response)
 });
 
 export const listDepartments = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await roles.listDepartments(req.query.all === 'true'));
+  ok(res, await roles.listDepartments(req.body?.all === true || req.body?.all === 'true'));
 });
 
 export const createDepartment = asyncHandler(async (req: Request, res: Response) => {
