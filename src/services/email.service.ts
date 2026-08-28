@@ -1,3 +1,7 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Email service
+// DATE : 2026-08-26
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import nodemailer from 'nodemailer';
@@ -6,8 +10,10 @@ import { logger } from '../config/logger.js';
 import { AppError } from '../utils/AppError.js';
 import { getMailConfig, mailIsConfigured } from './settings.service.js';
 
+/** Invite guest */
 export type InviteGuest = { email: string; name?: string | null };
 
+/** Invitation card */
 export type InvitationCard = {
   uid: string;
   to: string;
@@ -25,6 +31,7 @@ export type InvitationCard = {
   guests: InviteGuest[];
 };
 
+/** Invite send result */
 export type InviteSendResult = {
   configured: boolean;
   sent: number;
@@ -32,6 +39,7 @@ export type InviteSendResult = {
   error?: string;
 };
 
+/** Format when */
 function formatWhen(d: Date): string {
   return d.toLocaleString('en-IN', {
     weekday: 'short',
@@ -44,6 +52,7 @@ function formatWhen(d: Date): string {
   });
 }
 
+/** Escape HTML */
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -52,14 +61,17 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** ICS date */
 function icsDate(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
+/** ICS escape */
 function icsEscape(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 }
 
+/** Fold line */
 function foldLine(line: string): string {
   if (line.length <= 74) return line;
   const parts: string[] = [];
@@ -73,6 +85,7 @@ function foldLine(line: string): string {
   return parts.join('\r\n');
 }
 
+/** Build ICS */
 function buildIcs(card: InvitationCard, method: 'REQUEST' | 'CANCEL', senderMailbox?: string): string {
   const uid = `${card.uid}@evolv-halls`;
   const stamp = icsDate(new Date());
@@ -128,12 +141,14 @@ function buildIcs(card: InvitationCard, method: 'REQUEST' | 'CANCEL', senderMail
   return `${lines.join('\r\n')}\r\n`;
 }
 
+/** Greeting */
 function greeting(card: InvitationCard): string {
   const name = card.toName?.trim();
   if (name) return `Hi ${escapeHtml(name)},`;
   return 'Hello,';
 }
 
+/** Build invitation HTML */
 export function buildInvitationHtml(card: InvitationCard, cancelled = false): string {
   const when = `${formatWhen(card.startAt)} – ${formatWhen(card.endAt)}`;
   const location = card.hallLocation ? `<p style="margin:4px 0;color:#4a6354">${escapeHtml(card.hallLocation)}</p>` : '';
@@ -181,6 +196,7 @@ export function buildInvitationHtml(card: InvitationCard, cancelled = false): st
 </html>`;
 }
 
+/** Build invitation text */
 function buildInvitationText(card: InvitationCard, cancelled = false): string {
   return [
     cancelled ? `Cancelled: ${card.eventName}` : `Invitation: ${card.eventName}`,
@@ -195,6 +211,7 @@ function buildInvitationText(card: InvitationCard, cancelled = false): string {
     .join('\n');
 }
 
+/** Get transport */
 async function getTransport() {
   const cfg = await getMailConfig();
   return {
@@ -209,6 +226,7 @@ async function getTransport() {
   };
 }
 
+/** SMTP failure message */
 function smtpFailureMessage(cfg: { user: string; host: string }, err: unknown): string {
   const detail = err instanceof Error ? err.message : 'SMTP send failed';
   if (/535|BadCredentials|Username and Password not accepted/i.test(detail)) {
@@ -221,6 +239,7 @@ function smtpFailureMessage(cfg: { user: string; host: string }, err: unknown): 
   return `Mail server rejected the message: ${detail}`;
 }
 
+/** Archive invitation */
 async function archiveInvitation(to: string, html: string): Promise<void> {
   const dir = path.resolve(env.UPLOAD_DIR, 'invitations');
   await fs.mkdir(dir, { recursive: true });
@@ -229,6 +248,7 @@ async function archiveInvitation(to: string, html: string): Promise<void> {
   await fs.writeFile(file, html, 'utf8');
 }
 
+/** From header */
 function fromHeader(cfg: { user: string; from: string }, card: InvitationCard): string {
   const name = (card.organizerName || '').replace(/"/g, '').trim();
   const address = (card.organizerEmail || '').trim().toLowerCase();
@@ -237,6 +257,7 @@ function fromHeader(cfg: { user: string; from: string }, card: InvitationCard): 
   return cfg.from || cfg.user;
 }
 
+/** Deliver */
 async function deliver(card: InvitationCard, method: 'REQUEST' | 'CANCEL'): Promise<boolean> {
   const cancelled = method === 'CANCEL';
   const subject = cancelled
@@ -296,6 +317,7 @@ async function deliver(card: InvitationCard, method: 'REQUEST' | 'CANCEL'): Prom
   }
 }
 
+/** Send invitation card */
 export async function sendInvitationCard(card: InvitationCard): Promise<boolean> {
   try {
     return await deliver(card, 'REQUEST');
@@ -305,6 +327,7 @@ export async function sendInvitationCard(card: InvitationCard): Promise<boolean>
   }
 }
 
+/** Send cancellation card */
 export async function sendCancellationCard(card: InvitationCard): Promise<boolean> {
   try {
     return await deliver(card, 'CANCEL');
@@ -314,6 +337,7 @@ export async function sendCancellationCard(card: InvitationCard): Promise<boolea
   }
 }
 
+/** Send meeting invites */
 export async function sendMeetingInvites(cards: InvitationCard[]): Promise<InviteSendResult> {
   const cfg = await getMailConfig();
   const configured = mailIsConfigured(cfg);
@@ -341,6 +365,7 @@ export async function sendMeetingInvites(cards: InvitationCard[]): Promise<Invit
   return { configured, sent, failed: results.length - sent, error };
 }
 
+/** Send email */
 export async function sendEmail(to: string, subject: string, body: string): Promise<void> {
   const { cfg, transport } = await getTransport();
   if (!mailIsConfigured(cfg)) {
@@ -359,6 +384,7 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
   }
 }
 
+/** Send test mail */
 export async function sendTestMail(to: string): Promise<void> {
   await sendEmail(
     to,

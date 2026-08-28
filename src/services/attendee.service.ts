@@ -1,6 +1,10 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Attendee service
+// DATE : 2026-08-26
 import { query } from '../config/database.js';
 
-/** Read-only guest list for a booking. Rows are written when the booking is created. */
+/** List attendees */
 export async function listAttendees(bookingId: string) {
   return query(
     `SELECT Id, BookingId, UserId, Name, EmployeeId, Department, Email, Phone, CreatedAt

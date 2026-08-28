@@ -16,7 +16,7 @@ async function connectDbWithRetry(maxAttempts = 30, delayMs = 2000): Promise<boo
     } catch (err) {
       logger.warn(
         { attempt, maxAttempts, err: err instanceof Error ? err.message : err },
-        `MySQL not ready (${env.DB_SERVER}:${env.DB_PORT}). Retrying…`,
+        `SQL Server not ready (${env.DB_SERVER}:${env.DB_PORT}/${env.DB_NAME}). Retrying…`,
       );
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -33,7 +33,7 @@ async function main() {
   server.listen(env.PORT, host, () => {
     logger.info({ host, port: env.PORT }, 'API listening');
     logger.info(
-      `Open http://localhost:${env.PORT}/api/health — waiting for MySQL at ${env.DB_SERVER}:${env.DB_PORT}`,
+      `Open http://localhost:${env.PORT}/api/health — waiting for SQL Server at ${env.DB_SERVER}:${env.DB_PORT}/${env.DB_NAME}`,
     );
   });
 
@@ -43,12 +43,19 @@ async function main() {
       {
         server: env.DB_SERVER,
         port: env.DB_PORT,
-        tip: 'Start MAMP MySQL (port 8889) and confirm phpMyAdmin can connect.',
+        tip: 'Confirm SQL Server 192.168.9.19 CLIENT_API_LIVE is reachable with client_api_user.',
       },
-      'API is up but database is offline. Login and APIs will fail until MySQL is available.',
+      'API is up but SQL Server is offline. Login and APIs will fail until CLIENT_API_LIVE is available.',
     );
   } else {
-    await hydrateMailFromEnv();
+    try {
+      await hydrateMailFromEnv();
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'SMTP settings skipped (booking tables missing until a DBA runs booking_schema.sql)',
+      );
+    }
     startScheduler();
     logger.info({ ready: isDbReady() }, 'Database connected — scheduler started');
   }

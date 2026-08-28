@@ -7,6 +7,7 @@ import { ok } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import * as availability from '../services/availability.service.js';
 
+/** Check availability */
 export const check = asyncHandler(async (req: Request, res: Response) => {
   ok(res, await availability.checkAvailability(req.body));
 });

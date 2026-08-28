@@ -1,5 +1,10 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Rate limiter
+// DATE : 2026-08-26
 import rateLimit from 'express-rate-limit';
 
+/** Login limiter */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
@@ -8,6 +13,7 @@ export const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many login attempts. Try again later.', data: null },
 });
 
+/** API limiter */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 300,

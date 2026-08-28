@@ -26,7 +26,7 @@ export function createApp() {
     const db = await pingDb();
     res.status(db ? 200 : 503).json({
       success: db,
-      message: db ? 'Conference Hall API' : 'API is up but MySQL is offline',
+      message: db ? 'Conference Hall API' : 'API is up but SQL Server is offline',
       data: {
         status: db ? 'ok' : 'degraded',
         database: db ? 'connected' : 'disconnected',

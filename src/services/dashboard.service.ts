@@ -1,9 +1,10 @@
-import { query, queryOne } from '../config/database.js';
+import { query, queryOneSoft, querySoft } from '../config/database.js';
 import { todayInAppTz } from '../utils/clock.js';
+import { countDirectoryUsers } from './clientApiUsers.js';
 
 export async function getDashboard() {
   const today = todayInAppTz();
-  const stats = await queryOne<{
+  const stats = await queryOneSoft<{
     TotalHalls: number;
     AvailableHalls: number;
     OccupiedHalls: number;
@@ -22,23 +23,23 @@ export async function getDashboard() {
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND IsActive = 1 AND Status = N'AVAILABLE') AS AvailableHalls,
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND Status IN (N'OCCUPIED', N'BOOKED')) AS OccupiedHalls,
       (SELECT COUNT(*) FROM dbo.conference_halls WHERE DeletedAt IS NULL AND Status = N'MAINTENANCE') AS MaintenanceHalls,
-      (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND DATE(DATE_ADD(StartAt, INTERVAL 330 MINUTE)) = @Today
+      (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND CAST(DATEADD(MINUTE, 330, StartAt) AS DATE) = @Today
          AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')) AS TodayBookings,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status IN (N'CONFIRMED', N'APPROVED') AND StartAt > SYSUTCDATETIME()) AS UpcomingEvents,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status = N'PENDING') AS PendingApprovals,
       (SELECT COALESCE(SUM(AttendeeCount), 0) FROM dbo.bookings WHERE DeletedAt IS NULL
-         AND DATE(DATE_ADD(StartAt, INTERVAL 330 MINUTE)) = @Today
+         AND CAST(DATEADD(MINUTE, 330, StartAt) AS DATE) = @Today
          AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')) AS AttendeesToday,
-      (SELECT COUNT(*) FROM dbo.users WHERE DeletedAt IS NULL) AS TotalUsers,
-      (SELECT COUNT(*) FROM dbo.users WHERE DeletedAt IS NULL AND Status = N'ACTIVE') AS ActiveUsers,
+      (SELECT COUNT(*) FROM dbo.users) AS TotalUsers,
+      (SELECT COUNT(*) FROM dbo.users) AS ActiveUsers,
       (SELECT COUNT(*) FROM dbo.bookings WHERE DeletedAt IS NULL AND Status = N'CANCELLED'
          AND CreatedAt >= DATEADD(DAY, -30, SYSUTCDATETIME())) AS CancelledLast30,
       (SELECT COUNT(*) FROM dbo.departments WHERE IsActive = 1) AS Departments
   `, { Today: today });
 
-  const utilization = await query<{ HallName: string; HoursBooked: number }>(`
+  const utilization = await querySoft<{ HallName: string; HoursBooked: number }>(`
     SELECT h.Name AS HallName,
-           ROUND(COALESCE(SUM(TIMESTAMPDIFF(MINUTE, b.StartAt, b.EndAt)), 0) / 60.0, 2) AS HoursBooked
+           ROUND(COALESCE(SUM(DATEDIFF(MINUTE, b.StartAt, b.EndAt)), 0) / 60.0, 2) AS HoursBooked
     FROM dbo.conference_halls h
     LEFT JOIN dbo.bookings b ON b.HallId = h.Id AND b.DeletedAt IS NULL
       AND b.Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
@@ -48,7 +49,7 @@ export async function getDashboard() {
     ORDER BY HoursBooked DESC
   `);
 
-  const byDepartment = await query<{ Department: string; Count: number }>(`
+  const byDepartment = await querySoft<{ Department: string; Count: number }>(`
     SELECT d.Name AS Department, COUNT(*) AS Count
     FROM dbo.bookings b
     JOIN dbo.departments d ON d.Id = b.DepartmentId
@@ -58,7 +59,7 @@ export async function getDashboard() {
     ORDER BY Count DESC
   `);
 
-  const byEventType = await query<{ EventType: string; Count: number }>(`
+  const byEventType = await querySoft<{ EventType: string; Count: number }>(`
     SELECT EventType, COUNT(*) AS Count
     FROM dbo.bookings
     WHERE DeletedAt IS NULL AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
@@ -67,67 +68,70 @@ export async function getDashboard() {
     ORDER BY Count DESC
   `);
 
-  const trend = await query<{ Period: string; Count: number }>(`
-    SELECT DATE_FORMAT(StartAt, '%Y-%m-%d') AS Period, COUNT(*) AS Count
+  const trend = await querySoft<{ Period: string; Count: number }>(`
+    SELECT CONVERT(varchar(10), StartAt, 23) AS Period, COUNT(*) AS Count
     FROM dbo.bookings
     WHERE DeletedAt IS NULL AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
       AND StartAt >= DATEADD(DAY, -30, SYSUTCDATETIME())
-    GROUP BY DATE_FORMAT(StartAt, '%Y-%m-%d')
+    GROUP BY CONVERT(varchar(10), StartAt, 23)
     ORDER BY Period
   `);
 
-  const peakHours = await query<{ Hour: number; Count: number }>(`
-    SELECT HOUR(StartAt) AS Hour, COUNT(*) AS Count
+  const peakHours = await querySoft<{ Hour: number; Count: number }>(`
+    SELECT DATEPART(HOUR, StartAt) AS Hour, COUNT(*) AS Count
     FROM dbo.bookings
     WHERE DeletedAt IS NULL AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
       AND StartAt >= DATEADD(DAY, -30, SYSUTCDATETIME())
-    GROUP BY HOUR(StartAt)
+    GROUP BY DATEPART(HOUR, StartAt)
     ORDER BY Hour
   `);
 
-  const todaySchedule = await query(`
+  const todaySchedule = await querySoft(`
     SELECT b.Id, b.EventName, b.StartAt, b.EndAt, b.Status, h.Name AS HallName, h.Code AS HallCode,
-           CONCAT(o.FirstName, ' ', o.LastName) AS OrganizerName, b.AttendeeCount
+           o.UserName AS OrganizerName, b.AttendeeCount
     FROM dbo.bookings b
     JOIN dbo.conference_halls h ON h.Id = b.HallId
-    JOIN dbo.users o ON o.Id = b.OrganizerId
-    WHERE b.DeletedAt IS NULL AND DATE(DATE_ADD(b.StartAt, INTERVAL 330 MINUTE)) = @Today
+    JOIN dbo.users o ON CAST(o.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
+    WHERE b.DeletedAt IS NULL AND CAST(DATEADD(MINUTE, 330, b.StartAt) AS DATE) = @Today
       AND b.Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT')
     ORDER BY b.StartAt
-    LIMIT 12
+    OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY
   `, { Today: today });
 
-  const upcoming = await query(`
+  const upcoming = await querySoft(`
     SELECT b.Id, b.EventName, b.StartAt, b.EndAt, b.Status, h.Name AS HallName,
-           CONCAT(o.FirstName, ' ', o.LastName) AS OrganizerName
+           o.UserName AS OrganizerName
     FROM dbo.bookings b
     JOIN dbo.conference_halls h ON h.Id = b.HallId
-    JOIN dbo.users o ON o.Id = b.OrganizerId
+    JOIN dbo.users o ON CAST(o.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
     WHERE b.DeletedAt IS NULL AND b.StartAt > SYSUTCDATETIME()
       AND b.Status IN (N'CONFIRMED', N'APPROVED', N'PENDING')
     ORDER BY b.StartAt
-    LIMIT 8
+    OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY
   `);
 
-  const recent = await query(`
+  const recent = await querySoft(`
     SELECT b.Id, b.EventName, b.CreatedAt, b.Status, h.Name AS HallName, b.BookingNumber
     FROM dbo.bookings b
     JOIN dbo.conference_halls h ON h.Id = b.HallId
     WHERE b.DeletedAt IS NULL
     ORDER BY b.CreatedAt DESC
-    LIMIT 8
+    OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY
   `);
 
   const usersByRole = await query<{ RoleName: string; RoleCode: string; Count: number }>(`
-    SELECT r.Name AS RoleName, r.Code AS RoleCode, COUNT(*) AS Count
-    FROM dbo.users u
-    JOIN dbo.roles r ON r.Id = u.RoleId
-    WHERE u.DeletedAt IS NULL
-    GROUP BY r.Id, r.Name, r.Code
+    SELECT
+      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'Administrator' ELSE N'Employee' END AS RoleName,
+      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END AS RoleCode,
+      COUNT(*) AS Count
+    FROM dbo.users
+    GROUP BY
+      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'Administrator' ELSE N'Employee' END,
+      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END
     ORDER BY Count DESC
   `);
 
-  const hallBoard = await query<{
+  const hallBoard = await querySoft<{
     Id: string;
     Name: string;
     Code: string;
@@ -141,11 +145,21 @@ export async function getDashboard() {
               AND b.Status IN (N'ONGOING', N'CONFIRMED', N'APPROVED')
               AND b.StartAt <= SYSUTCDATETIME() AND b.EndAt > SYSUTCDATETIME()
             ORDER BY b.StartAt
-            LIMIT 1) AS CurrentEvent
+            OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY) AS CurrentEvent
     FROM dbo.conference_halls h
     WHERE h.DeletedAt IS NULL AND h.IsActive = 1
     ORDER BY h.Name
   `);
+
+  try {
+      const directoryCount = await countDirectoryUsers();
+      if (stats) {
+        stats.TotalUsers = directoryCount;
+        stats.ActiveUsers = directoryCount;
+      }
+    } catch {
+      /* keep local hall/booking counts */
+    }
 
   return {
     stats: stats ?? {

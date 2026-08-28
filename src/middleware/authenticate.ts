@@ -1,24 +1,15 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Authenticate
+// DATE : 2026-08-26
 import type { NextFunction, Request, Response } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import { AppError } from '../utils/AppError.js';
-import { query } from '../config/database.js';
+import { directoryToAuth } from '../services/auth.service.js';
+import { findDirectoryUserById } from '../services/clientApiUsers.js';
 import type { AuthUser } from '../types/index.js';
 
-type UserRow = {
-  Id: string;
-  Email: string;
-  EmployeeId: string;
-  FirstName: string;
-  LastName: string;
-  RoleId: string;
-  RoleCode: string;
-  RoleName: string;
-  DepartmentId: string | null;
-  Status: string;
-};
-
-type PermRow = { Code: string };
-
+/** Authenticate */
 export async function authenticate(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const header = req.headers.authorization;
@@ -27,37 +18,11 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     }
     const token = header.slice(7);
     const claims = verifyAccessToken(token);
-    const user = await query<UserRow>(
-      `SELECT u.Id, u.Email, u.EmployeeId, u.FirstName, u.LastName, u.RoleId,
-              r.Code AS RoleCode, r.Name AS RoleName, u.DepartmentId, u.Status
-       FROM dbo.users u
-       JOIN dbo.roles r ON r.Id = u.RoleId
-       WHERE u.Id = @Id AND u.DeletedAt IS NULL`,
-      { Id: claims.sub },
-    );
-    const row = user[0];
-    if (!row || row.Status !== 'ACTIVE') {
+    const directory = await findDirectoryUserById(String(claims.sub));
+    if (!directory?.isActive) {
       throw new AppError('Account is not active.', 401);
     }
-    const perms = await query<PermRow>(
-      `SELECT p.Code
-       FROM dbo.role_permissions rp
-       JOIN dbo.permissions p ON p.Id = rp.PermissionId
-       WHERE rp.RoleId = @RoleId`,
-      { RoleId: row.RoleId },
-    );
-    const auth: AuthUser = {
-      id: String(row.Id),
-      email: row.Email,
-      employeeId: row.EmployeeId,
-      firstName: row.FirstName,
-      lastName: row.LastName,
-      roleId: String(row.RoleId),
-      roleCode: row.RoleCode,
-      roleName: row.RoleName,
-      departmentId: row.DepartmentId == null ? null : String(row.DepartmentId),
-      permissions: perms.map((p) => p.Code),
-    };
+    const auth: AuthUser = directoryToAuth(directory);
     req.user = auth;
     next();
   } catch (err) {
@@ -66,6 +31,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   }
 }
 
+/** Authorize */
 export function authorize(...required: string[]) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const user = req.user;
@@ -86,6 +52,7 @@ export function authorize(...required: string[]) {
   };
 }
 
+/** Optional auth */
 export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {

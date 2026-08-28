@@ -1,7 +1,12 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Validate request
+// DATE : 2026-08-26
 import type { NextFunction, Request, Response } from 'express';
 import type { ZodType } from 'zod';
 import { AppError } from '../utils/AppError.js';
 
+/** Validate request */
 export function validateRequest(schema: {
   body?: ZodType;
   query?: ZodType;

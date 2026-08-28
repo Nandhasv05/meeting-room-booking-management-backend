@@ -1,14 +1,21 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Crypto envelope
+// DATE : 2026-08-26
 import type { NextFunction, Request, Response } from 'express';
 import { env } from '../config/env.js';
 import { decryptData, encryptDataV2, isDecryptFailure } from '../utils/crypto.js';
 import { fail } from '../utils/apiResponse.js';
 
+/** Skip request decrypt */
 const SKIP_REQUEST_DECRYPT = new Set(['/reports/export']);
 
+/** Should skip request decrypt */
 function shouldSkipRequestDecrypt(req: Request): boolean {
   return SKIP_REQUEST_DECRYPT.has(req.path);
 }
 
+/** Read request token */
 function readRequestToken(req: Request): string | undefined {
   const fromBody = req.body && typeof req.body === 'object' ? (req.body as { requestToken?: unknown }).requestToken : undefined;
   const fromQuery = req.query?.requestToken;
@@ -18,6 +25,7 @@ function readRequestToken(req: Request): string | undefined {
   return undefined;
 }
 
+/** Wrap JSON */
 function wrapJson(res: Response): void {
   const originalJson = res.json.bind(res);
   res.json = ((body: unknown) => {
@@ -38,6 +46,7 @@ function wrapJson(res: Response): void {
   }) as Response['json'];
 }
 
+/** Crypto envelope */
 export function cryptoEnvelope(req: Request, res: Response, next: NextFunction): void {
   wrapJson(res);
 

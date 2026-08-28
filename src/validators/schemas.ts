@@ -5,10 +5,21 @@ import { EVENT_TYPES, HALL_TYPES, HALL_STATUSES } from '../config/constants.js';
 export const dbId = z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).transform((v) => String(v));
 
 export const loginSchema = {
-  body: z.object({
-    email: z.string().email(),
-    password: z.string().min(1),
-  }),
+  body: z
+    .object({
+      email: z.string().optional(),
+      username: z.string().optional(),
+      password: z.string().min(1),
+    })
+    .superRefine((value, ctx) => {
+      if (!(value.email || value.username || '').trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Email or username is required', path: ['email'] });
+      }
+    })
+    .transform((value) => ({
+      email: (value.email || value.username || '').trim(),
+      password: value.password,
+    })),
 };
 
 export const refreshSchema = {

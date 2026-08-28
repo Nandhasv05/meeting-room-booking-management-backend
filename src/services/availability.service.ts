@@ -4,6 +4,7 @@
 // DATE : 2026-08-26
 import { query, queryOne } from '../config/database.js';
 
+/** Slot conflict */
 export type SlotConflict = {
   Id: string;
   BookingNumber: string;
@@ -14,6 +15,7 @@ export type SlotConflict = {
   HallName: string;
 };
 
+/** Hall availability */
 export type HallAvailability = {
   hallId: string;
   hallName: string;
@@ -26,6 +28,7 @@ export type HallAvailability = {
   maintenance: { Id: string; Title: string; StartAt: string; EndAt: string }[];
 };
 
+/** Person availability */
 export type PersonAvailability = {
   userId: string;
   name: string;
@@ -36,6 +39,7 @@ export type PersonAvailability = {
   conflicts: SlotConflict[];
 };
 
+/** Availability input */
 export type AvailabilityInput = {
   hallId?: string;
   userIds?: string[];
@@ -48,10 +52,12 @@ export type AvailabilityInput = {
 /** Statuses that still hold a slot. Cancelled/rejected bookings free the room. */
 const HOLDS_SLOT = `Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')`;
 
+/** Clock */
 function clock(d: Date) {
   return d.toTimeString().slice(0, 8);
 }
 
+/** Hall availability */
 async function hallAvailability(
   hallId: string,
   startAt: Date,
@@ -129,12 +135,14 @@ async function hallAvailability(
   };
 }
 
+/** People availability */
 async function peopleAvailability(
   userIds: string[],
   startAt: Date,
   endAt: Date,
   excludeBookingId?: string,
 ): Promise<PersonAvailability[]> {
+  const ids = userIds.map(String).join(',');
   const people = await query<{
     Id: string;
     FirstName: string;
@@ -143,11 +151,10 @@ async function peopleAvailability(
     EmployeeId: string | null;
     DepartmentName: string | null;
   }>(
-    `SELECT u.Id, u.FirstName, u.LastName, u.Email, u.EmployeeId, d.Name AS DepartmentName
+    `SELECT u.Id, u.UserName AS FirstName, N'' AS LastName, u.Email, u.UserName AS EmployeeId, u.Department AS DepartmentName
      FROM dbo.users u
-     LEFT JOIN dbo.departments d ON d.Id = u.DepartmentId
-     WHERE u.Id IN (@UserIds) AND u.DeletedAt IS NULL`,
-    { UserIds: userIds },
+     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))`,
+    { UserIds: ids },
   );
   if (!people.length) return [];
 
@@ -169,10 +176,10 @@ async function peopleAvailability(
         )
       )
      JOIN dbo.conference_halls h ON h.Id = b.HallId
-     WHERE u.Id IN (@UserIds)
+     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))
        AND (@ExcludeBookingId IS NULL OR b.Id <> @ExcludeBookingId)
      ORDER BY b.StartAt`,
-    { UserIds: userIds, StartAt: startAt, EndAt: endAt, ExcludeBookingId: excludeBookingId ?? null },
+    { UserIds: ids, StartAt: startAt, EndAt: endAt, ExcludeBookingId: excludeBookingId ?? null },
   );
 
   return people.map((u) => {
@@ -189,6 +196,7 @@ async function peopleAvailability(
   });
 }
 
+/** Check availability */
 export async function checkAvailability(input: AvailabilityInput) {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);

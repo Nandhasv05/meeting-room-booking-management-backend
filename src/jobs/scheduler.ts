@@ -1,9 +1,14 @@
+// AUTHOR : NANDHAKUMAR S V
+// VERSION : 1.0.0
+// DESCRIPTION : Scheduler
+// DATE : 2026-08-26
 import { logger } from '../config/logger.js';
 import { transitionDueBookings } from '../services/booking.service.js';
 import { query } from '../config/database.js';
 import { notify } from '../services/notification.service.js';
 import { getSetting } from '../services/settings.service.js';
 
+/** Start scheduler */
 export function startScheduler(): void {
   const tick = async () => {
     try {

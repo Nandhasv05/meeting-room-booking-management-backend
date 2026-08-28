@@ -1,4 +1,4 @@
-import { query, queryOne, insert } from '../config/database.js';
+import { query, queryOne, querySoft, insert } from '../config/database.js';
 import { AppError } from '../utils/AppError.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS, SOCKET_EVENTS } from '../config/constants.js';
@@ -11,9 +11,9 @@ const HALL_SELECT = `
   SELECT h.Id, h.Name, h.Code, h.Description, h.Location, h.Building, h.Floor, h.Capacity,
          h.HallType, h.Status, h.ImageUrl, CONVERT(varchar(8), h.OpeningTime, 108) AS OpeningTime,
          CONVERT(varchar(8), h.ClosingTime, 108) AS ClosingTime, h.ContactPersonId,
-         CONCAT(u.FirstName, ' ', u.LastName) AS ContactName, h.IsActive, h.CreatedAt
+         u.UserName AS ContactName, h.IsActive, h.CreatedAt
   FROM dbo.conference_halls h
-  LEFT JOIN dbo.users u ON u.Id = h.ContactPersonId
+  LEFT JOIN dbo.users u ON CAST(u.Id AS nvarchar(64)) = CAST(h.ContactPersonId AS nvarchar(64))
 `;
 
 export async function listHalls(filters: { q?: string; status?: string; building?: string; active?: string }) {
@@ -33,7 +33,7 @@ export async function listHalls(filters: { q?: string; status?: string; building
   }
   if (filters.active === 'true') where.push('h.IsActive = 1');
   if (filters.active === 'false') where.push('h.IsActive = 0');
-  return query<HallRow>(`${HALL_SELECT} WHERE ${where.join(' AND ')} ORDER BY h.Name`, inputs);
+  return querySoft<HallRow>(`${HALL_SELECT} WHERE ${where.join(' AND ')} ORDER BY h.Name`, inputs);
 }
 
 export async function getHall(id: string) {
@@ -217,7 +217,7 @@ async function syncLayouts(hallId: string, layouts: { name: string; capacity: nu
 }
 
 export async function listFacilities() {
-  return query(`SELECT Id, Code, Name, Icon, IsActive FROM dbo.facilities ORDER BY Name`);
+  return querySoft(`SELECT Id, Code, Name, Icon, IsActive FROM dbo.facilities ORDER BY Name`);
 }
 
 export async function createFacility(input: { code: string; name: string; icon?: string }) {
