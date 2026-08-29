@@ -1,6 +1,6 @@
 // AUTHOR : NANDHAKUMAR S V
 // VERSION : 1.0.0
-// DESCRIPTION : SQL Server pool for CLIENT_API_LIVE (all APIs)
+// DESCRIPTION : SQL Server pool for the booking catalog (dbo.users login)
 // DATE : 2026-08-28
 import sql from 'mssql';
 import { env } from './env.js';

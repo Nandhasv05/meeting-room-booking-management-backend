@@ -1,27 +1,31 @@
 import { query, queryOne, querySoft, insert } from '../config/database.js';
 import { AppError } from '../utils/AppError.js';
-import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isTcsDepartment } from '../config/access.js';
+import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isDirectoryAdmin } from '../config/access.js';
 import type { AuthUser } from '../types/index.js';
 
 export async function listRoles() {
-  const users = await query<{ Department: string | null }>(`SELECT Department FROM dbo.users`);
-  const tcs = users.filter((u) => isTcsDepartment(u.Department)).length;
+  const users = await query<{ Department: string | null; Role: string | null; IsAdmin: unknown }>(
+    `SELECT Department, Role, IsAdmin FROM dbo.users`,
+  );
+  const admins = users.filter((u) =>
+    isDirectoryAdmin({ department: u.Department, role: u.Role, isAdmin: u.IsAdmin }),
+  ).length;
   return [
     {
       Id: 'ADMINISTRATOR',
       Code: 'ADMINISTRATOR',
       Name: 'Administrator',
-      Description: 'TCS department — full access',
+      Description: 'IsAdmin, Role Admin/SuperAdmin/it_admin, or Department TCS — full access',
       IsSystem: true,
-      UserCount: tcs,
+      UserCount: admins,
     },
     {
       Id: 'EMPLOYEE',
       Code: 'EMPLOYEE',
       Name: 'Employee',
-      Description: 'All other departments',
+      Description: 'All other dbo.users rows',
       IsSystem: true,
-      UserCount: users.length - tcs,
+      UserCount: users.length - admins,
     },
   ];
 }
@@ -47,10 +51,75 @@ export async function listPermissions() {
 }
 
 export async function setRolePermissions(_actor: AuthUser, _roleId: string, _permissionIds: string[]) {
-  throw new AppError('Access is based on CLIENT_API_LIVE Department (TCS = full access).', 400);
+  throw new AppError('Access is based on CLIENT_API_LIVE dbo.users Role (Admin / it_admin) or Department TCS.', 400);
+}
+
+function departmentCode(name: string): string {
+  return name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 30) || 'DEPT';
+}
+
+export async function ensureDirectoryDepartments(): Promise<void> {
+  const names = await querySoft<{ Department: string }>(
+    `SELECT DISTINCT LTRIM(RTRIM(Department)) AS Department
+     FROM dbo.users
+     WHERE Department IS NOT NULL AND LTRIM(RTRIM(Department)) <> N''`,
+  );
+  for (const row of names) {
+    const name = String(row.Department ?? '').trim();
+    if (!name) continue;
+    const code = departmentCode(name);
+    await querySoft(
+      `IF NOT EXISTS (
+          SELECT 1 FROM dbo.departments
+          WHERE DeletedAt IS NULL
+            AND (UPPER(LTRIM(RTRIM(Name))) = UPPER(@Name) OR UPPER(LTRIM(RTRIM(Code))) = UPPER(@Code))
+        )
+        INSERT INTO dbo.departments (Code, Name) VALUES (@Code, @Name)`,
+      { Name: name, Code: code },
+    );
+  }
+}
+
+export async function resolveDepartmentId(value: string): Promise<string> {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) throw new AppError('Department is required.', 422);
+  await ensureDirectoryDepartments();
+  const existing = await queryOne<{ Id: string | number }>(
+    `SELECT TOP (1) Id FROM dbo.departments
+     WHERE DeletedAt IS NULL AND (
+       CAST(Id AS nvarchar(64)) = @Value
+       OR UPPER(LTRIM(RTRIM(Code))) = UPPER(@Value)
+       OR UPPER(LTRIM(RTRIM(Name))) = UPPER(@Value)
+     )
+     ORDER BY Id`,
+    { Value: trimmed },
+  );
+  if (existing) return String(existing.Id);
+  try {
+    return await insert(`INSERT INTO dbo.departments (Code, Name) VALUES (@Code, @Name)`, {
+      Code: departmentCode(trimmed),
+      Name: trimmed,
+    });
+  } catch {
+    const again = await queryOne<{ Id: string | number }>(
+      `SELECT TOP (1) Id FROM dbo.departments
+       WHERE DeletedAt IS NULL AND (
+         UPPER(LTRIM(RTRIM(Code))) = UPPER(@Value) OR UPPER(LTRIM(RTRIM(Name))) = UPPER(@Value)
+       )
+       ORDER BY Id`,
+      { Value: trimmed },
+    );
+    if (again) return String(again.Id);
+    throw new AppError('Department was not found.', 422);
+  }
 }
 
 export async function listDepartments(includeInactive = false) {
+  await ensureDirectoryDepartments();
   return querySoft(
     `SELECT Id, Code, Name, Description, IsActive, CreatedAt
      FROM dbo.departments

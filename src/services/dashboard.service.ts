@@ -1,4 +1,5 @@
 import { query, queryOneSoft, querySoft } from '../config/database.js';
+import { DIRECTORY_ADMIN_SQL } from '../config/access.js';
 import { todayInAppTz } from '../utils/clock.js';
 import { countDirectoryUsers } from './clientApiUsers.js';
 
@@ -121,13 +122,13 @@ export async function getDashboard() {
 
   const usersByRole = await query<{ RoleName: string; RoleCode: string; Count: number }>(`
     SELECT
-      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'Administrator' ELSE N'Employee' END AS RoleName,
-      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END AS RoleCode,
+      CASE WHEN ${DIRECTORY_ADMIN_SQL} THEN N'Administrator' ELSE N'Employee' END AS RoleName,
+      CASE WHEN ${DIRECTORY_ADMIN_SQL} THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END AS RoleCode,
       COUNT(*) AS Count
     FROM dbo.users
     GROUP BY
-      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'Administrator' ELSE N'Employee' END,
-      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS' THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END
+      CASE WHEN ${DIRECTORY_ADMIN_SQL} THEN N'Administrator' ELSE N'Employee' END,
+      CASE WHEN ${DIRECTORY_ADMIN_SQL} THEN N'ADMINISTRATOR' ELSE N'EMPLOYEE' END
     ORDER BY Count DESC
   `);
 

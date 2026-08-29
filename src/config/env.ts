@@ -29,7 +29,6 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v !== 'false'),
-  DIRECTORY_DEFAULT_PASSWORD: z.string().min(1).default('Password#123'),
   JWT_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES: z.string().default('15m'),

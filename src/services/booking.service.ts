@@ -6,6 +6,8 @@ import { AppError, ConflictError } from '../utils/AppError.js';
 import { bookingNumber, newQrToken } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS, SOCKET_EVENTS } from '../config/constants.js';
+import { DIRECTORY_ADMIN_SQL } from '../config/access.js';
+import { resolveDepartmentId } from './role.service.js';
 import { getIo } from '../sockets/registry.js';
 import { notify, notifyMany } from './notification.service.js';
 import { sendCancellationCard, sendMeetingInvites, type InvitationCard } from './email.service.js';
@@ -207,6 +209,7 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
     );
   }
   const hall = await assertHallReady(input.hallId, startAt, endAt, input.attendeeCount);
+  const departmentId = await resolveDepartmentId(input.departmentId);
   // No approval step: a free hall and a free slot are the only gate.
   const status = input.draft ? 'DRAFT' : 'CONFIRMED';
   const organizerId = input.organizerId ?? user.id;
@@ -233,7 +236,7 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
         BookingNumber: number,
         EventName: input.eventName.trim(),
         EventType: input.eventType,
-        DepartmentId: input.departmentId,
+        DepartmentId: departmentId,
         OrganizerId: organizerId,
         ContactNumber: input.contactNumber ?? null,
         ContactEmail: input.mailId?.trim().toLowerCase() ?? null,
@@ -316,7 +319,7 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
 
   const managers = await query<{ Id: string }>(
     `SELECT CAST(u.Id AS nvarchar(64)) AS Id FROM dbo.users u
-     WHERE UPPER(LTRIM(RTRIM(ISNULL(u.Department, N'')))) = N'TCS'`,
+     WHERE ${DIRECTORY_ADMIN_SQL}`,
   );
   await notify({
     userId: organizerId,
@@ -421,7 +424,7 @@ export async function updateBooking(user: AuthUser, id: string, input: Partial<C
         Id: id,
         EventName: input.eventName ?? null,
         EventType: input.eventType ?? null,
-        DepartmentId: input.departmentId ?? null,
+        DepartmentId: input.departmentId ? await resolveDepartmentId(input.departmentId) : null,
         ContactNumber: input.contactNumber ?? null,
         HallId: hallId,
         BookingDate: startAt.toISOString().slice(0, 10),

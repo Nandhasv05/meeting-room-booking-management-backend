@@ -29,6 +29,8 @@ export async function getUser(id: string): Promise<UserRow> {
     Email: directory.email,
     Department: directory.department,
     IsActive: directory.isActive,
+    Role: directory.role,
+    IsAdmin: directory.isAdmin,
   });
 }
 
@@ -47,7 +49,7 @@ export async function createUser(
   },
   _req: Request,
 ): Promise<UserRow> {
-  throw new AppError('Users are managed in CLIENT_API_LIVE. Set Department = TCS for full access.', 400);
+  throw new AppError('Users are managed in CLIENT_API_LIVE dbo.users.', 400);
 }
 
 export async function updateUser(
@@ -64,11 +66,11 @@ export async function updateUser(
   }>,
   _req: Request,
 ): Promise<UserRow> {
-  throw new AppError('Users are managed in CLIENT_API_LIVE. Set Department = TCS for full access.', 400);
+  throw new AppError('Users are managed in CLIENT_API_LIVE dbo.users.', 400);
 }
 
 export async function resetPassword(_actor: AuthUser, _id: string, _password: string): Promise<void> {
-  throw new AppError('Passwords are managed in CLIENT_API_LIVE.', 400);
+  throw new AppError('Passwords are managed in CLIENT_API_LIVE dbo.users.', 400);
 }
 
 export async function searchEmployees(q: string) {
