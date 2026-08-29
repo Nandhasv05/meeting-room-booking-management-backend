@@ -4,10 +4,11 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { hashToken, newId } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS } from '../config/constants.js';
-import { accessForDepartment } from '../config/access.js';
+import { accessForDirectoryUser } from '../config/access.js';
 import {
   authenticateDirectory,
   findDirectoryUserById,
+  touchDirectoryLastLogin,
   type DirectoryUser,
 } from './clientApiUsers.js';
 import type { Request } from 'express';
@@ -21,7 +22,11 @@ function splitName(value: string): { first: string; last: string } {
 
 export function directoryToAuth(directory: DirectoryUser): AuthUser {
   const names = splitName(directory.userName);
-  const access = accessForDepartment(directory.department);
+  const access = accessForDirectoryUser({
+    department: directory.department,
+    role: directory.role,
+    isAdmin: directory.isAdmin,
+  });
   return {
     id: directory.id,
     email: directory.email,
@@ -75,6 +80,7 @@ export async function login(email: string, password: string, req: Request) {
   }
   const user = directoryToAuth(directory);
   const tokens = await issueTokens(user);
+  await touchDirectoryLastLogin(user.id);
   await writeAudit({
     userId: user.id,
     action: AUDIT_ACTIONS.LOGIN,
@@ -134,5 +140,5 @@ export async function logout(user: AuthUser, req: Request): Promise<void> {
 }
 
 export async function changeOwnPassword(_user: AuthUser, _current: string, _next: string): Promise<void> {
-  throw new AppError('Passwords are managed in CLIENT_API_LIVE.', 400);
+  throw new AppError('Passwords are managed in CLIENT_API_LIVE dbo.users.', 400);
 }

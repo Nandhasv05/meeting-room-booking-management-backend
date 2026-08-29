@@ -3,8 +3,19 @@
 // DESCRIPTION : Validate request
 // DATE : 2026-08-26
 import type { NextFunction, Request, Response } from 'express';
-import type { ZodType } from 'zod';
+import { ZodError, type ZodType } from 'zod';
 import { AppError } from '../utils/AppError.js';
+
+function zodPayload(err: unknown) {
+  if (!(err instanceof ZodError)) return { errors: err };
+  const errors = err.issues.map((issue) => ({
+    path: issue.path.join('.') || 'body',
+    message: issue.message,
+  }));
+  const first = errors[0];
+  const message = first ? `${first.path}: ${first.message}` : 'Validation failed.';
+  return { message, errors };
+}
 
 /** Validate request */
 export function validateRequest(schema: {
@@ -22,7 +33,8 @@ export function validateRequest(schema: {
       if (schema.params) req.params = schema.params.parse(req.params) as typeof req.params;
       next();
     } catch (err) {
-      next(new AppError('Validation failed.', 422, err));
+      const payload = zodPayload(err);
+      next(new AppError(payload.message ?? 'Validation failed.', 422, payload));
     }
   };
 }

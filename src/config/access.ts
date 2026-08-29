@@ -1,10 +1,19 @@
 // AUTHOR : NANDHAKUMAR S V
 // DATE : 28/08/2026
-// DESCRIPTION : CLIENT_API_LIVE department access — TCS = full admin, else employee
+// DESCRIPTION : dbo.users access — admin if Role Admin/SuperAdmin/it_admin, or Department TCS
 
 export const TCS_DEPARTMENT = 'TCS';
 export const FULL_ACCESS_ROLE = 'ADMINISTRATOR';
 export const EMPLOYEE_ROLE = 'EMPLOYEE';
+
+const ADMIN_ROLE_KEYS = new Set([
+  'ADMIN',
+  'SUPERADMIN',
+  'ADMINISTRATOR',
+  'SUPER',
+  'SUPERADMINISTRATOR',
+  'ITADMIN',
+]);
 
 export const EMPLOYEE_PERMISSIONS = [
   'dashboard.view',
@@ -43,30 +52,72 @@ export const ADMIN_PERMISSIONS = [
   'maintenance.manage',
 ] as const;
 
-export function isTcsDepartment(value: unknown): boolean {
-  const text = String(value ?? '')
+function compactUpper(value: unknown): string {
+  return String(value ?? '')
     .trim()
     .toUpperCase()
-    .replace(/\s+/g, ' ');
-  return text === TCS_DEPARTMENT;
+    .replace(/[^A-Z0-9]+/g, '');
 }
+
+export function isTcsDepartment(value: unknown): boolean {
+  return compactUpper(value) === TCS_DEPARTMENT;
+}
+
+export function isAdminFlag(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const text = String(value ?? '')
+    .trim()
+    .toUpperCase();
+  return ['1', 'TRUE', 'YES', 'Y'].includes(text);
+}
+
+export function isAdminRoleName(role: unknown): boolean {
+  return ADMIN_ROLE_KEYS.has(compactUpper(role));
+}
+
+export type DirectoryAccessInput = {
+  role?: unknown;
+  isAdmin?: unknown;
+  department?: unknown;
+};
+
+export function isDirectoryAdmin(input: DirectoryAccessInput): boolean {
+  return isAdminFlag(input.isAdmin) || isAdminRoleName(input.role) || isTcsDepartment(input.department);
+}
+
+/** SQL predicate for dbo.users rows with full access. */
+export const DIRECTORY_ADMIN_SQL = `(
+  ISNULL(TRY_CONVERT(int, IsAdmin), 0) = 1
+  OR UPPER(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(Role, N''))), N' ', N''), N'_', N''), N'.', N''))
+      IN (N'ADMIN', N'SUPERADMIN', N'ADMINISTRATOR', N'SUPER', N'SUPERADMINISTRATOR', N'ITADMIN')
+  OR UPPER(LTRIM(RTRIM(ISNULL(Department, N'')))) = N'TCS'
+)`;
 
 export function roleCodeForDepartment(department: unknown): typeof FULL_ACCESS_ROLE | typeof EMPLOYEE_ROLE {
   return isTcsDepartment(department) ? FULL_ACCESS_ROLE : EMPLOYEE_ROLE;
+}
+
+export function roleCodeForDirectoryUser(input: DirectoryAccessInput): typeof FULL_ACCESS_ROLE | typeof EMPLOYEE_ROLE {
+  return isDirectoryAdmin(input) ? FULL_ACCESS_ROLE : EMPLOYEE_ROLE;
 }
 
 export function roleNameForCode(code: string): string {
   return code === FULL_ACCESS_ROLE ? 'Administrator' : 'Employee';
 }
 
-export function accessForDepartment(department: unknown) {
-  const roleCode = roleCodeForDepartment(department);
+export function accessForDirectoryUser(input: DirectoryAccessInput) {
+  const roleCode = roleCodeForDirectoryUser(input);
   return {
     roleId: roleCode,
     roleCode,
     roleName: roleNameForCode(roleCode),
     permissions: [...(roleCode === FULL_ACCESS_ROLE ? ADMIN_PERMISSIONS : EMPLOYEE_PERMISSIONS)],
   };
+}
+
+export function accessForDepartment(department: unknown) {
+  return accessForDirectoryUser({ department });
 }
 
 export async function loadPermissionsByRoleCode(roleCode: string) {
