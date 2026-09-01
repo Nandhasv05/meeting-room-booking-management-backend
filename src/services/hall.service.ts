@@ -1,4 +1,5 @@
-import { query, queryOne, querySoft, insert } from '../config/database.js';
+import { query, queryOne, insert } from '../config/database.js';
+import { querySoft } from '../config/sqlSoft.js';
 import { AppError } from '../utils/AppError.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS, SOCKET_EVENTS } from '../config/constants.js';

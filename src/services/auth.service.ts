@@ -4,7 +4,7 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { hashToken, newId } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS } from '../config/constants.js';
-import { accessForDirectoryUser } from '../config/access.js';
+import { accessForDirectoryUser } from '../config/directoryAccess.js';
 import {
   authenticateDirectory,
   findDirectoryUser,
@@ -22,11 +22,14 @@ function splitName(value: string): { first: string; last: string } {
   return { first: parts[0] ?? 'User', last: parts.slice(1).join(' ') };
 }
 
-export function directoryToAuth(directory: DirectoryUser): AuthUser {
-  const names = splitName(directory.userName);
+export function directoryToAuth(
+  directory: DirectoryUser,
+  overrides?: { username?: string; role?: string },
+): AuthUser {
+  const names = splitName(overrides?.username || directory.userName);
   const access = accessForDirectoryUser({
     department: directory.department,
-    role: directory.role,
+    role: overrides?.role || directory.role,
     isAdmin: directory.isAdmin,
   });
   return {

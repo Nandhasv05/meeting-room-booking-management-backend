@@ -1,4 +1,5 @@
-import { insert, query, queryOne, querySoft } from '../config/database.js';
+import { insert, query, queryOne } from '../config/database.js';
+import { querySoft } from '../config/sqlSoft.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser } from '../types/index.js';
 

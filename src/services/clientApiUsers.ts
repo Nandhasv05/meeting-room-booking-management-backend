@@ -5,7 +5,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { getClientApiPool, isClientApiConfigured, sql } from '../config/clientApi.js';
 import { logger } from '../config/logger.js';
-import { isDirectoryAdmin, roleCodeForDirectoryUser, roleNameForCode } from '../config/access.js';
+import { isDirectoryAdmin, roleCodeForDirectoryUser, roleNameForCode } from '../config/directoryAccess.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser, Paged } from '../types/index.js';
 import type { UserRow } from '../types/db.js';

@@ -2,7 +2,8 @@
 // VERSION : 1.0.0
 // DESCRIPTION : Seed booking system
 // DATE : 2026-08-26
-import { getPool, query, queryOne, queryOneSoft, querySoft, insert, closePool } from '../config/database.js';
+import { getPool, query, queryOne, insert, closePool } from '../config/database.js';
+import { queryOneSoft, querySoft } from '../config/sqlSoft.js';
 import { logger } from '../config/logger.js';
 
 /** Halls */

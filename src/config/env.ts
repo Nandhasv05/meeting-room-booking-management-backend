@@ -47,7 +47,7 @@ const schema = z.object({
 });
 
 /** Parsed */
-const parsed = schema.safeParse(process.env);
+const parsed = schema.passthrough().safeParse(process.env);
 if (!parsed.success) {
   const missing = parsed.error.issues.map((i) => i.path.join('.')).join(', ');
   throw new Error(`Invalid environment: ${missing}`);
@@ -58,3 +58,22 @@ export const env = parsed.data;
 
 /** Is production */
 export const isProd = env.NODE_ENV === 'production';
+
+function originOnly(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return String(url || '').replace(/\/$/, '');
+  }
+}
+
+/** Browser Origin values allowed in production CORS */
+export const corsOrigins: string[] | boolean = isProd
+  ? Array.from(
+      new Set(
+        [env.FRONTEND_URL, 'https://apps.evolvclothing.com', 'http://localhost:5173']
+          .map(originOnly)
+          .filter(Boolean),
+      ),
+    )
+  : true;

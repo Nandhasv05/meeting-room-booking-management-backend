@@ -1,12 +1,13 @@
 // AUTHOR : NANDHAKUMAR S V
 // DATE : 28/08/2026
 // DESCRIPTION : Booking service
-import { query, queryOne, querySoft, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
+import { query, queryOne, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
+import { querySoft } from '../config/sqlSoft.js';
 import { AppError, ConflictError } from '../utils/AppError.js';
 import { bookingNumber, newQrToken } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS, SOCKET_EVENTS } from '../config/constants.js';
-import { DIRECTORY_ADMIN_SQL } from '../config/access.js';
+import { DIRECTORY_ADMIN_SQL } from '../config/directoryAccess.js';
 import { resolveDepartmentId } from './role.service.js';
 import { getIo } from '../sockets/registry.js';
 import { notify, notifyMany } from './notification.service.js';

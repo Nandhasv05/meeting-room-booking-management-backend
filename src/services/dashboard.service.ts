@@ -1,5 +1,6 @@
-import { query, queryOneSoft, querySoft } from '../config/database.js';
-import { isDirectoryAdmin } from '../config/access.js';
+import { query } from '../config/database.js';
+import { queryOneSoft, querySoft } from '../config/sqlSoft.js';
+import { isDirectoryAdmin } from '../config/directoryAccess.js';
 import { logger } from '../config/logger.js';
 import { todayInAppTz } from '../utils/clock.js';
 import { countDirectoryUsers } from './clientApiUsers.js';

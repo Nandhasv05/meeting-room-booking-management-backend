@@ -253,11 +253,12 @@ function writePdf(
     doc.font('Helvetica-Bold').fontSize(7).fillColor('#ffffff');
     let x = MARGIN;
     keys.forEach((key, i) => {
+      const col = widths[i] ?? 40;
       doc.text(humanizeKey(key).toUpperCase(), x + pad, y + 7, {
-        width: widths[i] - pad * 2,
+        width: col - pad * 2,
         lineBreak: false,
       });
-      x += widths[i];
+      x += col;
     });
     doc.restore();
     return y + rowH;
@@ -283,7 +284,9 @@ function writePdf(
       const cells = keys.map((key) => formatCell(key, row[key]));
       doc.font('Helvetica').fontSize(fontSize);
       const contentH = Math.max(
-        ...cells.map((text, i) => doc.heightOfString(text, { width: Math.max(widths[i] - pad * 2, 12) })),
+        ...cells.map((text, i) =>
+          doc.heightOfString(text, { width: Math.max((widths[i] ?? 40) - pad * 2, 12) }),
+        ),
         10,
       );
       const rowH = contentH + pad * 2;
@@ -300,15 +303,16 @@ function writePdf(
 
       let x = MARGIN;
       keys.forEach((key, i) => {
+        const col = widths[i] ?? 40;
         const isStatus = key === 'Status';
         doc.font(isStatus ? 'Helvetica-Bold' : 'Helvetica')
           .fontSize(fontSize)
           .fillColor(isStatus ? statusColor(String(row[key] ?? '')) : INK)
-          .text(cells[i], x + pad, y + pad, {
-            width: widths[i] - pad * 2,
+          .text(cells[i] ?? '', x + pad, y + pad, {
+            width: col - pad * 2,
             align: key === 'AttendeeCount' || key === 'Count' || key === 'Capacity' ? 'right' : 'left',
           });
-        x += widths[i];
+        x += col;
       });
       y += rowH;
     });

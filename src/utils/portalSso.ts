@@ -2,7 +2,6 @@
 // DATE : 31/08/2026
 // DESCRIPTION : Verify short-lived SSO tickets issued by the EVOL PHP portal
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { env } from '../config/env.js';
 import { AppError } from './AppError.js';
 
 
@@ -31,13 +30,17 @@ function decodePayload(body: string): { u?: unknown; exp?: unknown } {
   return JSON.parse(Buffer.from(padded + pad, 'base64').toString('utf8')) as { u?: unknown; exp?: unknown };
 }
 
+function portalSsoSecret(): string {
+  return String(process.env.PORTAL_SSO_SECRET || '').trim();
+}
+
 export function isPortalSsoConfigured(): boolean {
-  return Boolean(env.PORTAL_SSO_SECRET?.trim());
+  return Boolean(portalSsoSecret());
 }
 
 /** Return directory login (UserName or Email) from a portal ticket. */
 export function verifyPortalTicket(ticket: string): string {
-  const secret = env.PORTAL_SSO_SECRET?.trim();
+  const secret = portalSsoSecret();
   if (!secret) {
     throw new AppError('Portal SSO is not configured.', 503);
   }

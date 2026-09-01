@@ -1,6 +1,7 @@
-import { query, queryOne, querySoft, insert } from '../config/database.js';
+import { query, queryOne, insert } from '../config/database.js';
+import { querySoft } from '../config/sqlSoft.js';
 import { AppError } from '../utils/AppError.js';
-import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isDirectoryAdmin } from '../config/access.js';
+import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isDirectoryAdmin } from '../config/directoryAccess.js';
 import type { AuthUser } from '../types/index.js';
 
 export async function listRoles() {
