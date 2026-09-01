@@ -20,8 +20,6 @@ export function createApp() {
   app.use(compression());
   app.use(cookieParser());
   app.use(express.json({ limit: '1mb' }));
-  app.use(apiLimiter);
-
   app.get('/api/health', async (_req, res) => {
     const db = await pingDb();
     res.status(db ? 200 : 503).json({
@@ -35,6 +33,7 @@ export function createApp() {
       },
     });
   });
+  app.use(apiLimiter);
 
   app.use('/uploads', express.static(path.resolve(env.UPLOAD_DIR)));
   app.use('/api', router);
