@@ -43,10 +43,14 @@ export const normaliseCompanyIdAliases = (data: unknown): unknown => {
   return out;
 };
 
+function jsonReplacer(_key: string, value: unknown): unknown {
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
 /******* ENCRYPT DATA *******/
 export const encryptData = (data: object, key: string): string => {
   const KEY = hashMD5(key);
-  const jsonString = JSON.stringify(normaliseCompanyIdAliases(data));
+  const jsonString = JSON.stringify(normaliseCompanyIdAliases(data), jsonReplacer);
   const encrypted = CryptoJS.AES.encrypt(jsonString, KEY, {
     iv: LEGACY_IV,
     mode: CryptoJS.mode.CBC,
@@ -60,7 +64,7 @@ export const encryptData = (data: object, key: string): string => {
 export const encryptDataV2 = (data: object, key: string): string => {
   const KEY = CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(key));
   const iv = CryptoJS.lib.WordArray.random(16);
-  const jsonString = JSON.stringify(normaliseCompanyIdAliases(data));
+  const jsonString = JSON.stringify(normaliseCompanyIdAliases(data), jsonReplacer);
   const encrypted = CryptoJS.AES.encrypt(jsonString, KEY, {
     iv,
     mode: CryptoJS.mode.CBC,

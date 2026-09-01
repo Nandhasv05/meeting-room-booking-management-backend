@@ -15,6 +15,12 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   ok(res, data, 'Signed in.');
 });
 
+/** Portal SSO */
+export const portalSso = asyncHandler(async (req: Request, res: Response) => {
+  const data = await auth.loginWithPortalSso(String(req.body.sso ?? ''), req);
+  ok(res, data, 'Signed in.');
+});
+
 /** Refresh */
 export const refresh = asyncHandler(async (req: Request, res: Response) => {
   const data = await auth.refresh(req.body.refreshToken);
@@ -47,7 +53,7 @@ export const listUsers = asyncHandler(async (req: Request, res: Response) => {
 
 /** Get user */
 export const getUser = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await users.getUser(req.params.id as string));
+  ok(res, await users.getUser(req.user!, req.params.id as string));
 });
 
 /** Create user */

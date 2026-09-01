@@ -13,6 +13,7 @@ import * as halls from '../controllers/hall.controller.js';
 import * as book from '../controllers/booking.controller.js';
 import * as ops from '../controllers/ops.controller.js';
 import * as avail from '../controllers/availability.controller.js';
+import * as contact from '../controllers/contact.controller.js';
 
 /** Router */
 export const router = Router();
@@ -22,6 +23,7 @@ router.use(cryptoEnvelope);
 
 /** Login */
 router.post('/auth/login', loginLimiter, validateRequest(schema.loginSchema), auth.login);
+router.post('/auth/sso', loginLimiter, validateRequest(schema.portalSsoSchema), auth.portalSso);
 router.post('/auth/refresh', validateRequest(schema.refreshSchema), auth.refresh);
 router.post('/auth/logout', authenticate, auth.logout);
 router.post('/auth/me', authenticate, auth.me);
@@ -29,7 +31,7 @@ router.post('/auth/me', authenticate, auth.me);
 /** Users */
 router.post('/users/search', authenticate, auth.searchEmployees);
 router.post('/users/create', authenticate, authorize('users.manage'), validateRequest(schema.createUserSchema), auth.createUser);
-router.post('/users/:id/reset-password', authenticate, authorize('users.manage'), auth.resetPassword);
+router.post('/users/:id/reset-password', authenticate, authorize('users.manage'), validateRequest(schema.resetPasswordSchema), auth.resetPassword);
 router.post('/users/:id/update', authenticate, authorize('users.manage'), validateRequest(schema.updateUserSchema), auth.updateUser);
 router.post('/users/:id', authenticate, authorize('users.view'), auth.getUser);
 router.post('/users', authenticate, authorize('users.view'), auth.listUsers);
@@ -118,3 +120,10 @@ router.post('/settings', authenticate, authorize('settings.manage'), ops.getSett
 
 /** Audit logs */
 router.post('/audit-logs', authenticate, authorize('audit.view'), ops.auditLogs);
+
+/** Shared guest contacts — same book for every login */
+router.post('/contacts/import', authenticate, authorize('bookings.create', 'attendees.view'), validateRequest(schema.contactImportSchema), contact.importContacts);
+router.post('/contacts/create', authenticate, authorize('bookings.create', 'attendees.view'), validateRequest(schema.contactSchema), contact.createContact);
+router.post('/contacts/:id/update', authenticate, authorize('bookings.create', 'attendees.view'), validateRequest(schema.contactSchema), contact.updateContact);
+router.post('/contacts/:id/delete', authenticate, authorize('bookings.create', 'attendees.view'), contact.deleteContact);
+router.post('/contacts', authenticate, authorize('bookings.create', 'attendees.view', 'bookings.view'), contact.listContacts);

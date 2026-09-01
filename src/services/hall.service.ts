@@ -244,15 +244,20 @@ export async function deleteFacility(id: string) {
 }
 
 export async function hallAvailability(hallId: string, from: string, to: string) {
-  await getHall(hallId);
+  const hall = await getHall(hallId);
+  const start = from && !Number.isNaN(new Date(from).getTime()) ? new Date(from) : new Date();
+  if (!from) start.setHours(0, 0, 0, 0);
+  const end = to && !Number.isNaN(new Date(to).getTime()) ? new Date(to) : new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
   const bookings = await query(
-    `SELECT Id, EventName, StartAt, EndAt, Status, OrganizerId
-     FROM dbo.bookings
-     WHERE HallId = @HallId AND DeletedAt IS NULL
-       AND Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')
-       AND StartAt < @To AND EndAt > @From
-     ORDER BY StartAt`,
-    { HallId: hallId, From: new Date(from), To: new Date(to) },
+    `SELECT b.Id, b.BookingNumber, b.EventName, b.StartAt, b.EndAt, b.Status, b.AttendeeCount,
+            u.UserName AS OrganizerName
+     FROM dbo.bookings b
+     LEFT JOIN dbo.users u ON CAST(u.Id AS nvarchar(64)) = CAST(b.OrganizerId AS nvarchar(64))
+     WHERE b.HallId = @HallId AND b.DeletedAt IS NULL
+       AND b.Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')
+       AND b.StartAt < @To AND b.EndAt > @From
+     ORDER BY b.StartAt`,
+    { HallId: hallId, From: start, To: end },
   );
   const maintenance = await query(
     `SELECT Id, Title, StartAt, EndAt, Status
@@ -260,7 +265,15 @@ export async function hallAvailability(hallId: string, from: string, to: string)
      WHERE HallId = @HallId AND DeletedAt IS NULL
        AND Status IN (N'SCHEDULED', N'IN_PROGRESS')
        AND StartAt < @To AND EndAt > @From`,
-    { HallId: hallId, From: new Date(from), To: new Date(to) },
+    { HallId: hallId, From: start, To: end },
   );
-  return { bookings, maintenance };
+  return {
+    hallId: hall.Id,
+    openingTime: hall.OpeningTime,
+    closingTime: hall.ClosingTime,
+    from: start.toISOString(),
+    to: end.toISOString(),
+    bookings,
+    maintenance,
+  };
 }

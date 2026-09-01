@@ -26,6 +26,10 @@ export const refreshSchema = {
   body: z.object({ refreshToken: z.string().min(10) }),
 };
 
+export const portalSsoSchema = {
+  body: z.object({ sso: z.string().min(20) }),
+};
+
 export const idParam = {
   params: z.object({ id: dbId }),
 };
@@ -34,31 +38,46 @@ export const hallCodeParam = {
   params: z.object({ hallCode: z.string().min(1).max(30) }),
 };
 
+const directoryUserId = z.string().min(1).max(64);
+const directoryRoleId = z.enum(['ADMINISTRATOR', 'EMPLOYEE']);
+const directoryDepartment = z.string().max(80);
+
 export const createUserSchema = {
   body: z.object({
-    employeeId: z.string().min(2).max(40),
-    firstName: z.string().min(1).max(80),
-    lastName: z.string().min(1).max(80),
+    employeeId: z.string().min(2).max(40).trim(),
+    firstName: z.string().max(80).optional().default(''),
+    lastName: z.string().max(80).optional().default(''),
     email: z.string().email(),
     phone: z.string().max(30).optional(),
-    departmentId: dbId.optional(),
+    department: directoryDepartment.optional(),
+    departmentId: directoryDepartment.optional(),
     designation: z.string().max(120).optional(),
-    roleId: dbId,
+    roleId: directoryRoleId,
     password: z.string().min(8).max(80),
+    status: z.enum(['ACTIVE', 'DISABLED']).optional(),
   }),
 };
 
 export const updateUserSchema = {
-  params: z.object({ id: dbId }),
+  params: z.object({ id: directoryUserId }),
   body: z.object({
     firstName: z.string().min(1).max(80).optional(),
-    lastName: z.string().min(1).max(80).optional(),
+    lastName: z.string().max(80).optional(),
+    email: z.string().email().optional(),
     phone: z.string().max(30).optional(),
-    departmentId: dbId.nullable().optional(),
+    department: directoryDepartment.nullable().optional(),
+    departmentId: directoryDepartment.nullable().optional(),
     designation: z.string().max(120).optional(),
-    roleId: dbId.optional(),
+    employeeId: z.string().min(2).max(40).trim().optional(),
+    roleId: directoryRoleId.optional(),
     status: z.enum(['ACTIVE', 'DISABLED', 'LOCKED']).optional(),
+    password: z.string().min(8).max(80).optional(),
   }),
+};
+
+export const resetPasswordSchema = {
+  params: z.object({ id: directoryUserId }),
+  body: z.object({ password: z.string().min(8).max(80) }),
 };
 
 export const createHallSchema = {
@@ -166,6 +185,26 @@ export const settingsSchema = {
 export const testMailSchema = {
   body: z.object({
     to: z.string().email(),
+  }),
+};
+
+export const contactSchema = {
+  body: z.object({
+    name: z.string().max(160).optional(),
+    email: z.string().email(),
+    phone: z.string().max(30).optional(),
+  }),
+};
+
+export const contactImportSchema = {
+  body: z.object({
+    contacts: z.array(
+      z.object({
+        name: z.string().max(160).optional(),
+        email: z.string().email(),
+        phone: z.string().max(30).optional(),
+      }),
+    ).min(1).max(500),
   }),
 };
 

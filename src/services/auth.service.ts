@@ -7,10 +7,12 @@ import { AUDIT_ACTIONS } from '../config/constants.js';
 import { accessForDirectoryUser } from '../config/access.js';
 import {
   authenticateDirectory,
+  findDirectoryUser,
   findDirectoryUserById,
   touchDirectoryLastLogin,
   type DirectoryUser,
 } from './clientApiUsers.js';
+import { verifyPortalTicket } from '../utils/portalSso.js';
 import type { Request } from 'express';
 import type { AuthUser } from '../types/index.js';
 
@@ -74,6 +76,28 @@ export async function login(email: string, password: string, req: Request) {
   const directory = await authenticateDirectory(String(email ?? '').trim(), String(password ?? ''));
   if (!directory) {
     throw new AppError('Invalid email or password.', 401);
+  }
+  if (!directory.isActive) {
+    throw new AppError('Account is disabled.', 403);
+  }
+  const user = directoryToAuth(directory);
+  const tokens = await issueTokens(user);
+  await touchDirectoryLastLogin(user.id);
+  await writeAudit({
+    userId: user.id,
+    action: AUDIT_ACTIONS.LOGIN,
+    module: 'auth',
+    recordId: user.id,
+    req,
+  });
+  return { user, ...tokens };
+}
+
+export async function loginWithPortalSso(ticket: string, req: Request) {
+  const login = verifyPortalTicket(ticket);
+  const directory = await findDirectoryUser(login);
+  if (!directory) {
+    throw new AppError('Portal user was not found in the directory.', 401);
   }
   if (!directory.isActive) {
     throw new AppError('Account is disabled.', 403);
