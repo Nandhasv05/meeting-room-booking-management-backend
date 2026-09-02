@@ -241,11 +241,15 @@ function smtpFailureMessage(cfg: { user: string; host: string }, err: unknown): 
 
 /** Archive invitation */
 async function archiveInvitation(to: string, html: string): Promise<void> {
-  const dir = path.resolve(env.UPLOAD_DIR, 'invitations');
-  await fs.mkdir(dir, { recursive: true });
-  const safe = to.replace(/[^a-z0-9._@-]/gi, '_');
-  const file = path.join(dir, `${Date.now()}-${safe}.html`);
-  await fs.writeFile(file, html, 'utf8');
+  try {
+    const dir = path.resolve(env.UPLOAD_DIR, 'invitations');
+    await fs.mkdir(dir, { recursive: true });
+    const safe = to.replace(/[^a-z0-9._@-]/gi, '_');
+    const file = path.join(dir, `${Date.now()}-${safe}.html`);
+    await fs.writeFile(file, html, 'utf8');
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), to }, 'Could not archive invitation HTML');
+  }
 }
 
 /** From header */
@@ -339,7 +343,18 @@ export async function sendCancellationCard(card: InvitationCard): Promise<boolea
 
 /** Send meeting invites */
 export async function sendMeetingInvites(cards: InvitationCard[]): Promise<InviteSendResult> {
-  const cfg = await getMailConfig();
+  let cfg;
+  try {
+    cfg = await getMailConfig();
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Mail config failed');
+    return {
+      configured: false,
+      sent: 0,
+      failed: cards.length,
+      error: 'Mail settings could not be loaded.',
+    };
+  }
   const configured = mailIsConfigured(cfg);
   if (!configured) {
     return {

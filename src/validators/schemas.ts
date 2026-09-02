@@ -1,6 +1,34 @@
 import { z } from 'zod';
 import { EVENT_TYPES, HALL_TYPES, HALL_STATUSES } from '../config/constants.js';
 
+/** Intranet hosts such as user@client-api.local must be accepted. */
+const mailId = z
+  .string()
+  .trim()
+  .min(3)
+  .max(180)
+  .refine((value) => /^[^\s@]+@[^\s@]+$/.test(value), 'Enter a valid mail ID');
+
+const optionalMail = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  mailId.optional(),
+);
+
+function directoryIds(values: unknown): string[] {
+  const list = Array.isArray(values) ? values : [];
+  return [
+    ...new Set(
+      list
+        .map((value) => String(value ?? '').trim())
+        .filter((id) => id && id.length <= 64 && id !== 'undefined' && id !== 'null' && !id.startsWith('guest:')),
+    ),
+  ].slice(0, 50);
+}
+
+function onlyMailIds(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter((value) => /^[^\s@]+@[^\s@]+$/.test(value)))];
+}
+
 /** Table primary/foreign keys are BIGINT AUTO_INCREMENT (sent as digit strings). */
 export const dbId = z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).transform((v) => String(v));
 
@@ -26,6 +54,10 @@ export const refreshSchema = {
   body: z.object({ refreshToken: z.string().min(10) }),
 };
 
+export const portalSsoSchema = {
+  body: z.object({ sso: z.string().min(20) }),
+};
+
 export const idParam = {
   params: z.object({ id: dbId }),
 };
@@ -34,31 +66,46 @@ export const hallCodeParam = {
   params: z.object({ hallCode: z.string().min(1).max(30) }),
 };
 
+const directoryUserId = z.string().min(1).max(64);
+const directoryRoleId = z.enum(['ADMINISTRATOR', 'EMPLOYEE']);
+const directoryDepartment = z.string().max(80);
+
 export const createUserSchema = {
   body: z.object({
-    employeeId: z.string().min(2).max(40),
-    firstName: z.string().min(1).max(80),
-    lastName: z.string().min(1).max(80),
+    employeeId: z.string().min(2).max(40).trim(),
+    firstName: z.string().max(80).optional().default(''),
+    lastName: z.string().max(80).optional().default(''),
     email: z.string().email(),
     phone: z.string().max(30).optional(),
-    departmentId: dbId.optional(),
+    department: directoryDepartment.optional(),
+    departmentId: directoryDepartment.optional(),
     designation: z.string().max(120).optional(),
-    roleId: dbId,
+    roleId: directoryRoleId,
     password: z.string().min(8).max(80),
+    status: z.enum(['ACTIVE', 'DISABLED']).optional(),
   }),
 };
 
 export const updateUserSchema = {
-  params: z.object({ id: dbId }),
+  params: z.object({ id: directoryUserId }),
   body: z.object({
     firstName: z.string().min(1).max(80).optional(),
-    lastName: z.string().min(1).max(80).optional(),
+    lastName: z.string().max(80).optional(),
+    email: z.string().email().optional(),
     phone: z.string().max(30).optional(),
-    departmentId: dbId.nullable().optional(),
+    department: directoryDepartment.nullable().optional(),
+    departmentId: directoryDepartment.nullable().optional(),
     designation: z.string().max(120).optional(),
-    roleId: dbId.optional(),
+    employeeId: z.string().min(2).max(40).trim().optional(),
+    roleId: directoryRoleId.optional(),
     status: z.enum(['ACTIVE', 'DISABLED', 'LOCKED']).optional(),
+    password: z.string().min(8).max(80).optional(),
   }),
+};
+
+export const resetPasswordSchema = {
+  params: z.object({ id: directoryUserId }),
+  body: z.object({ password: z.string().min(8).max(80) }),
 };
 
 export const createHallSchema = {
@@ -91,8 +138,8 @@ export const createBookingSchema = {
     departmentId: z.union([z.string().trim().min(1).max(120), z.number().int().positive()]).transform((v) => String(v)),
     organizerId: dbId.optional(),
     contactNumber: z.string().max(30).optional(),
-    mailId: z.string().email().optional(),
-    invitationEmails: z.array(z.string().trim().email()).max(50).optional(),
+    mailId: optionalMail,
+    invitationEmails: z.array(z.string()).max(50).optional().transform(onlyMailIds),
     hallId: dbId,
     startAt: z.string().datetime({ offset: true }).or(z.string().min(10)),
     endAt: z.string().min(10),
@@ -109,7 +156,7 @@ export const createBookingSchema = {
           name: z.string(),
           employeeId: z.string().optional(),
           department: z.string().optional(),
-          email: z.string().trim().email().optional(),
+          email: optionalMail,
           phone: z.string().optional(),
         }),
       )
@@ -120,11 +167,14 @@ export const createBookingSchema = {
 
 export const availabilityCheckSchema = {
   body: z.object({
-    hallId: dbId.optional(),
-    userIds: z.array(dbId).max(50).optional(),
+    hallId: z.preprocess(
+      (value) => (value == null || value === '' ? undefined : String(value).trim()),
+      z.string().min(1).max(64).optional(),
+    ),
+    userIds: z.preprocess(directoryIds, z.array(z.string()).max(50)).optional(),
     startAt: z.string().min(10),
     endAt: z.string().min(10),
-    attendeeCount: z.number().int().positive().optional(),
+    attendeeCount: z.coerce.number().int().positive().optional(),
     excludeBookingId: dbId.optional(),
   }),
 };
@@ -166,6 +216,26 @@ export const settingsSchema = {
 export const testMailSchema = {
   body: z.object({
     to: z.string().email(),
+  }),
+};
+
+export const contactSchema = {
+  body: z.object({
+    name: z.string().max(160).optional(),
+    email: z.string().email(),
+    phone: z.string().max(30).optional(),
+  }),
+};
+
+export const contactImportSchema = {
+  body: z.object({
+    contacts: z.array(
+      z.object({
+        name: z.string().max(160).optional(),
+        email: z.string().email(),
+        phone: z.string().max(30).optional(),
+      }),
+    ).min(1).max(500),
   }),
 };
 

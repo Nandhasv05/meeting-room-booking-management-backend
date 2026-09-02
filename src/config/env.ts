@@ -33,9 +33,11 @@ const schema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES: z.string().default('15m'),
   JWT_REFRESH_EXPIRES: z.string().default('7d'),
-  FRONTEND_URL: z.string().default('http://10.103.10.33'),
-  API_URL: z.string().default('http://10.103.10.33/api'),
+  FRONTEND_URL: z.string().default('http://10.103.10.32'),
+  API_URL: z.string().default('http://10.103.10.32/api'),
   API_CRYPTO_KEY: z.string().min(8).default('MeetingHallApiKey'),
+  PORTAL_SSO_SECRET: z.string().optional().default(''),
+  BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
@@ -57,3 +59,22 @@ export const env = parsed.data;
 
 /** Is production */
 export const isProd = env.NODE_ENV === 'production';
+
+function originOnly(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return String(url || '').replace(/\/$/, '');
+  }
+}
+
+/** Browser Origin values allowed in production CORS */
+export const corsOrigins: string[] | boolean = isProd
+  ? Array.from(
+      new Set(
+        [env.FRONTEND_URL, 'https://apps.evolvclothing.com', 'http://localhost:5173']
+          .map(originOnly)
+          .filter(Boolean),
+      ),
+    )
+  : true;

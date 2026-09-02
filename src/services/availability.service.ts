@@ -3,6 +3,29 @@
 //DESCRIPTION : Free/busy lookups for halls and employees before a booking is created
 // DATE : 2026-08-26
 import { query, queryOne } from '../config/database.js';
+import { logger } from '../config/logger.js';
+import { asClock, clockInAppTz } from '../utils/clock.js';
+
+function asDirectoryIds(ids: string[]): string[] {
+  return [
+    ...new Set(
+      ids
+        .map(String)
+        .map((id) => id.trim())
+        .filter((id) => id && id.length <= 64 && !id.startsWith('guest:')),
+    ),
+  ].slice(0, 50);
+}
+
+function bindIdList(ids: string[], prefix: string, inputs: Record<string, unknown>): string {
+  return ids
+    .map((id, i) => {
+      const key = `${prefix}${i}`;
+      inputs[key] = id;
+      return `@${key}`;
+    })
+    .join(', ');
+}
 
 /** Slot conflict */
 export type SlotConflict = {
@@ -51,11 +74,6 @@ export type AvailabilityInput = {
 
 /** Statuses that still hold a slot. Cancelled/rejected bookings free the room. */
 const HOLDS_SLOT = `Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')`;
-
-/** Clock */
-function clock(d: Date) {
-  return d.toTimeString().slice(0, 8);
-}
 
 /** Hall availability */
 async function hallAvailability(
@@ -115,8 +133,10 @@ async function hallAvailability(
     blockers.push(`Already booked: ${conflicts[0]?.EventName ?? 'another event'}.`);
   }
   if (maintenance.length) blockers.push('Under maintenance for this window.');
-  if (clock(startAt) < hall.OpeningTime || clock(endAt) > hall.ClosingTime) {
-    blockers.push(`Outside hall hours ${hall.OpeningTime.slice(0, 5)}–${hall.ClosingTime.slice(0, 5)}.`);
+  const opening = asClock(hall.OpeningTime);
+  const closing = asClock(hall.ClosingTime);
+  if (clockInAppTz(startAt) < opening || clockInAppTz(endAt) > closing) {
+    blockers.push(`Outside hall hours ${opening.slice(0, 5)}–${closing.slice(0, 5)}.`);
   }
   if (attendeeCount && attendeeCount > hall.Capacity) {
     blockers.push(`Attendees exceed capacity (${hall.Capacity}).`);
@@ -126,8 +146,8 @@ async function hallAvailability(
     hallId: hall.Id,
     hallName: hall.Name,
     capacity: hall.Capacity,
-    openingTime: hall.OpeningTime,
-    closingTime: hall.ClosingTime,
+    openingTime: opening,
+    closingTime: closing,
     available: blockers.length === 0,
     blockers,
     conflicts,
@@ -142,7 +162,10 @@ async function peopleAvailability(
   endAt: Date,
   excludeBookingId?: string,
 ): Promise<PersonAvailability[]> {
-  const ids = userIds.map(String).join(',');
+  const ids = asDirectoryIds(userIds);
+  if (!ids.length) return [];
+  const peopleInputs: Record<string, unknown> = {};
+  const peopleIn = bindIdList(ids, 'Uid', peopleInputs);
   const people = await query<{
     Id: string;
     FirstName: string;
@@ -153,11 +176,18 @@ async function peopleAvailability(
   }>(
     `SELECT u.Id, u.UserName AS FirstName, N'' AS LastName, u.Email, u.UserName AS EmployeeId, u.Department AS DepartmentName
      FROM dbo.users u
-     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))`,
-    { UserIds: ids },
+     WHERE CAST(u.Id AS nvarchar(64)) IN (${peopleIn})
+        OR LTRIM(RTRIM(u.UserName)) IN (${peopleIn})`,
+    peopleInputs,
   );
   if (!people.length) return [];
 
+  const busyInputs: Record<string, unknown> = {
+    StartAt: startAt,
+    EndAt: endAt,
+    ExcludeBookingId: excludeBookingId ?? null,
+  };
+  const busyIn = bindIdList(ids, 'Uid', busyInputs);
   const busy = await query<SlotConflict & { UserId: string }>(
     `SELECT DISTINCT u.Id AS UserId, b.Id, b.BookingNumber, b.EventName, b.StartAt, b.EndAt, b.Status,
             h.Name AS HallName
@@ -176,10 +206,13 @@ async function peopleAvailability(
         )
       )
      JOIN dbo.conference_halls h ON h.Id = b.HallId
-     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))
+     WHERE (
+          CAST(u.Id AS nvarchar(64)) IN (${busyIn})
+          OR LTRIM(RTRIM(u.UserName)) IN (${busyIn})
+        )
        AND (@ExcludeBookingId IS NULL OR b.Id <> @ExcludeBookingId)
      ORDER BY b.StartAt`,
-    { UserIds: ids, StartAt: startAt, EndAt: endAt, ExcludeBookingId: excludeBookingId ?? null },
+    busyInputs,
   );
 
   return people.map((u) => {
@@ -187,7 +220,7 @@ async function peopleAvailability(
     return {
       userId: u.Id,
       name: `${u.FirstName} ${u.LastName}`.trim(),
-      email: u.Email,
+      email: u.Email ?? '',
       employeeId: u.EmployeeId,
       department: u.DepartmentName,
       available: conflicts.length === 0,
@@ -200,13 +233,23 @@ async function peopleAvailability(
 export async function checkAvailability(input: AvailabilityInput) {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);
-  const [hall, people] = await Promise.all([
-    input.hallId
-      ? hallAvailability(input.hallId, startAt, endAt, input.attendeeCount, input.excludeBookingId)
-      : Promise.resolve(null),
-    input.userIds?.length
-      ? peopleAvailability(input.userIds, startAt, endAt, input.excludeBookingId)
-      : Promise.resolve([] as PersonAvailability[]),
-  ]);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+    return { hall: null, people: [] as PersonAvailability[] };
+  }
+  const userIds = asDirectoryIds(input.userIds ?? []);
+  const hall = input.hallId
+    ? await hallAvailability(input.hallId, startAt, endAt, input.attendeeCount, input.excludeBookingId)
+    : null;
+  let people: PersonAvailability[] = [];
+  if (userIds.length) {
+    try {
+      people = await peopleAvailability(userIds, startAt, endAt, input.excludeBookingId);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'People availability skipped; hall check still returned',
+      );
+    }
+  }
   return { hall, people };
 }

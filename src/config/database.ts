@@ -58,7 +58,7 @@ function bind(request: sql.Request, inputs?: SqlInputs): sql.Request {
       continue;
     }
     if (value instanceof Date) {
-      request.input(key, sql.DateTime, value);
+      request.input(key, sql.DateTime2, value);
       continue;
     }
     request.input(key, sql.NVarChar(sql.MAX), String(value));

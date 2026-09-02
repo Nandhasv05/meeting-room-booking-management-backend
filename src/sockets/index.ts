@@ -1,13 +1,13 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
-import { env, isProd } from '../config/env.js';
+import { corsOrigins } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { setIo } from './registry.js';
 import { verifyAccessToken } from '../utils/jwt.js';
 
 export function attachSockets(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
-    cors: { origin: isProd ? env.FRONTEND_URL : true, credentials: true },
+    cors: { origin: corsOrigins, credentials: true },
     path: '/socket.io',
   });
   setIo(io);

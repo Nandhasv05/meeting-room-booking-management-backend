@@ -22,7 +22,10 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     if (!directory?.isActive) {
       throw new AppError('Account is not active.', 401);
     }
-    const auth: AuthUser = directoryToAuth(directory);
+    const auth: AuthUser = directoryToAuth(directory, {
+      username: directory.userName,
+      role: claims.role,
+    });
     req.user = auth;
     next();
   } catch (err) {

@@ -4,13 +4,15 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { hashToken, newId } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS } from '../config/constants.js';
-import { accessForDirectoryUser } from '../config/access.js';
+import { accessForDirectoryUser } from '../config/directoryAccess.js';
 import {
   authenticateDirectory,
+  findDirectoryUser,
   findDirectoryUserById,
   touchDirectoryLastLogin,
   type DirectoryUser,
 } from './clientApiUsers.js';
+import { verifyPortalTicket } from '../utils/portalSso.js';
 import type { Request } from 'express';
 import type { AuthUser } from '../types/index.js';
 
@@ -20,11 +22,14 @@ function splitName(value: string): { first: string; last: string } {
   return { first: parts[0] ?? 'User', last: parts.slice(1).join(' ') };
 }
 
-export function directoryToAuth(directory: DirectoryUser): AuthUser {
-  const names = splitName(directory.userName);
+export function directoryToAuth(
+  directory: DirectoryUser,
+  overrides?: { username?: string; role?: string },
+): AuthUser {
+  const names = splitName(overrides?.username || directory.userName);
   const access = accessForDirectoryUser({
     department: directory.department,
-    role: directory.role,
+    role: overrides?.role || directory.role,
     isAdmin: directory.isAdmin,
   });
   return {
@@ -91,6 +96,28 @@ export async function login(email: string, password: string, req: Request) {
   return { user, ...tokens };
 }
 
+export async function loginWithPortalSso(ticket: string, req: Request) {
+  const login = verifyPortalTicket(ticket);
+  const directory = await findDirectoryUser(login);
+  if (!directory) {
+    throw new AppError('Portal user was not found in the directory.', 401);
+  }
+  if (!directory.isActive) {
+    throw new AppError('Account is disabled.', 403);
+  }
+  const user = directoryToAuth(directory);
+  const tokens = await issueTokens(user);
+  await touchDirectoryLastLogin(user.id);
+  await writeAudit({
+    userId: user.id,
+    action: AUDIT_ACTIONS.LOGIN,
+    module: 'auth',
+    recordId: user.id,
+    req,
+  });
+  return { user, ...tokens };
+}
+
 export async function refresh(refreshToken: string) {
   let claims;
   try {
@@ -99,23 +126,24 @@ export async function refresh(refreshToken: string) {
     throw new AppError('Invalid refresh token.', 401);
   }
   const hash = hashToken(refreshToken);
-  let userId: string | null = null;
+  let storedUserId: string | null = null;
   try {
     const session = await queryOne<{ UserId: string }>(
       `SELECT UserId FROM dbo.mh_sessions
        WHERE RefreshTokenHash = @Hash AND ExpiresAt > GETDATE()`,
       { Hash: hash },
     );
-    if (session) userId = String(session.UserId);
+    if (session) storedUserId = String(session.UserId);
   } catch {
-    const row = memorySessions.get(hash);
-    if (row && row.expires.getTime() > Date.now()) userId = row.userId;
+    /* mh_sessions may not exist; fall through to JWT */
   }
-  if (userId == null) {
+  if (storedUserId == null) {
     const row = memorySessions.get(hash);
-    if (row && row.expires.getTime() > Date.now()) userId = row.userId;
+    if (row && row.expires.getTime() > Date.now()) storedUserId = row.userId;
   }
-  if (!userId || String(userId) !== String(claims.sub)) {
+  // A valid refresh JWT is enough. Session rows are lost on PM2 restart when
+  // dbo.mh_sessions cannot be created on CLIENT_API_LIVE.
+  if (storedUserId && String(storedUserId) !== String(claims.sub)) {
     throw new AppError('Refresh token expired.', 401);
   }
   const directory = await findDirectoryUserById(String(claims.sub));

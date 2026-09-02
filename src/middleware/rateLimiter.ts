@@ -2,22 +2,51 @@
 // VERSION : 1.0.0
 // DESCRIPTION : Rate limiter
 // DATE : 2026-08-26
+import type { Request } from 'express';
 import rateLimit from 'express-rate-limit';
+
+function clientKey(req: Request): string {
+  const auth = String(req.headers.authorization || '');
+  if (auth.startsWith('Bearer ') && auth.length > 20) {
+    return `tok:${auth.slice(7, 40)}`;
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function isHealth(req: Request): boolean {
+  const path = req.path || '';
+  return path === '/health' || path === '/api/health' || path.endsWith('/health');
+}
+
+function fromLocalProxy(req: Request): boolean {
+  const ip = String(req.ip || req.socket.remoteAddress || '');
+  return ip === '127.0.0.1' || ip === '::1' || ip.endsWith('127.0.0.1');
+}
+
+function skipSharedOfficeIp(req: Request): boolean {
+  return isHealth(req) || fromLocalProxy(req);
+}
 
 /** Login limiter */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipSharedOfficeIp,
+  keyGenerator: clientKey,
+  validate: { xForwardedForHeader: false },
   message: { success: false, message: 'Too many login attempts. Try again later.', data: null },
 });
 
-/** API limiter */
+/** API limiter — office NAT + Apache proxy share one IP, so do not key only on IP. */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 300,
+  limit: 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipSharedOfficeIp,
+  keyGenerator: clientKey,
+  validate: { xForwardedForHeader: false },
   message: { success: false, message: 'Rate limit exceeded.', data: null },
 });

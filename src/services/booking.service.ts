@@ -1,18 +1,20 @@
 // AUTHOR : NANDHAKUMAR S V
 // DATE : 28/08/2026
 // DESCRIPTION : Booking service
-import { query, queryOne, querySoft, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
+import { query, queryOne, txQuery, txQueryOne, txInsert, withTransaction, sql, type DbTx } from '../config/database.js';
+import { querySoft } from '../config/sqlSoft.js';
 import { AppError, ConflictError } from '../utils/AppError.js';
 import { bookingNumber, newQrToken } from '../utils/ids.js';
 import { writeAudit } from '../middleware/auditLogger.js';
 import { AUDIT_ACTIONS, SOCKET_EVENTS } from '../config/constants.js';
-import { DIRECTORY_ADMIN_SQL } from '../config/access.js';
+import { DIRECTORY_ADMIN_SQL } from '../config/directoryAccess.js';
 import { resolveDepartmentId } from './role.service.js';
 import { getIo } from '../sockets/registry.js';
 import { notify, notifyMany } from './notification.service.js';
-import { sendCancellationCard, sendMeetingInvites, type InvitationCard } from './email.service.js';
+import { sendCancellationCard, sendMeetingInvites, type InvitationCard, type InviteSendResult } from './email.service.js';
 import { BOOKING_SELECT, omitQr, type BookingRow } from '../types/db.js';
-import { todayInAppTz } from '../utils/clock.js';
+import { asClock, clockInAppTz, dateInAppTz, todayInAppTz } from '../utils/clock.js';
+import { logger } from '../config/logger.js';
 import type { AuthUser, Paged } from '../types/index.js';
 import type { Request } from 'express';
 
@@ -101,8 +103,11 @@ function combineRange(startAt: Date, endAt: Date) {
   if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) {
     throw new AppError('Invalid start time.');
   }
+  if (!(endAt instanceof Date) || Number.isNaN(endAt.getTime())) {
+    throw new AppError('Invalid end time.');
+  }
   if (endAt <= startAt) throw new AppError('End time must be after start time.');
-  return { startAt, endAt, bookingDate: startAt.toISOString().slice(0, 10) };
+  return { startAt, endAt, bookingDate: dateInAppTz(startAt) };
 }
 
 /** Assert hall ready */
@@ -128,10 +133,12 @@ async function assertHallReady(hallId: string, startAt: Date, endAt: Date, atten
   if (attendeeCount > hall.Capacity) {
     throw new AppError(`Attendee count exceeds hall capacity (${hall.Capacity}).`);
   }
-  const startClock = startAt.toTimeString().slice(0, 8);
-  const endClock = endAt.toTimeString().slice(0, 8);
-  if (startClock < hall.OpeningTime || endClock > hall.ClosingTime) {
-    throw new AppError(`Booking must be within hall hours ${hall.OpeningTime.slice(0, 5)}–${hall.ClosingTime.slice(0, 5)}.`);
+  const opening = asClock(hall.OpeningTime);
+  const closing = asClock(hall.ClosingTime);
+  const startClock = clockInAppTz(startAt);
+  const endClock = clockInAppTz(endAt);
+  if (startClock < opening || endClock > closing) {
+    throw new AppError(`Booking must be within hall hours ${opening.slice(0, 5)}–${closing.slice(0, 5)}.`);
   }
   return hall;
 }
@@ -249,7 +256,7 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
         Purpose: input.purpose ?? null,
         CateringRequired: input.cateringRequired ?? false,
         SpecialRequirements: input.specialRequirements ?? null,
-        InviteNote: input.inviteNote ?? (input.invitationEmails?.join(', ') ?? null),
+        InviteNote: (input.inviteNote ?? '').trim().slice(0, 500) || null,
         Status: status,
         QrToken: qr,
         RequiresApproval: false,
@@ -276,16 +283,19 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
       );
     }
     for (const attendee of input.attendees ?? []) {
+      const email = attendee.email?.trim().toLowerCase() || null;
+      const name = String(attendee.name ?? '').trim().slice(0, 160) || (email?.split('@')[0] ?? '');
+      if (!name && !email) continue;
       await txInsert(
         tx,
         `INSERT INTO dbo.booking_attendees (BookingId, Name, EmployeeId, Department, Email, Phone)
          VALUES (@BookingId, @Name, @EmployeeId, @Department, @Email, @Phone)`,
         {
           BookingId: id,
-          Name: attendee.name,
+          Name: name || 'Guest',
           EmployeeId: attendee.employeeId ?? null,
           Department: attendee.department ?? null,
-          Email: attendee.email ?? null,
+          Email: email,
           Phone: attendee.phone ?? null,
         },
       );
@@ -308,38 +318,46 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
     }
   }, sql.ISOLATION_LEVEL.SERIALIZABLE);
 
-  await writeAudit({
-    userId: user.id,
-    action: AUDIT_ACTIONS.BOOKING_CREATED,
-    module: 'bookings',
-    recordId: id,
-    newValue: { number, hall: hall.Code, startAt },
-    req,
-  });
+  try {
+    await writeAudit({
+      userId: user.id,
+      action: AUDIT_ACTIONS.BOOKING_CREATED,
+      module: 'bookings',
+      recordId: id,
+      newValue: { number, hall: hall.Code, startAt },
+      req,
+    });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Booking created but audit log failed');
+  }
 
-  const managers = await query<{ Id: string }>(
-    `SELECT CAST(u.Id AS nvarchar(64)) AS Id FROM dbo.users u
-     WHERE ${DIRECTORY_ADMIN_SQL}`,
-  );
-  await notify({
-    userId: organizerId,
-    type: 'BOOKING_CREATED',
-    title: 'Booking created',
-    message: `${input.eventName} in ${hall.Name} was submitted.`,
-    relatedModule: 'bookings',
-    relatedId: id,
-  });
-  if (status !== 'DRAFT') {
-    await notifyMany(
-      managers.map((m) => m.Id),
-      {
-        type: 'BOOKING_CREATED',
-        title: 'Hall booked',
-        message: `${input.eventName} is confirmed in ${hall.Name}.`,
-        relatedModule: 'bookings',
-        relatedId: id,
-      },
+  try {
+    const managers = await query<{ Id: string }>(
+      `SELECT CAST(u.Id AS nvarchar(64)) AS Id FROM dbo.users u
+       WHERE ${DIRECTORY_ADMIN_SQL}`,
     );
+    await notify({
+      userId: organizerId,
+      type: 'BOOKING_CREATED',
+      title: 'Booking created',
+      message: `${input.eventName} in ${hall.Name} was submitted.`,
+      relatedModule: 'bookings',
+      relatedId: id,
+    });
+    if (status !== 'DRAFT') {
+      await notifyMany(
+        managers.map((m) => m.Id),
+        {
+          type: 'BOOKING_CREATED',
+          title: 'Hall booked',
+          message: `${input.eventName} is confirmed in ${hall.Name}.`,
+          relatedModule: 'bookings',
+          relatedId: id,
+        },
+      );
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Booking created but notifications failed');
   }
 
   const inviteTargets = [
@@ -353,8 +371,9 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
   const hallLoc = await queryOne<{ Location: string | null }>(
     `SELECT Location FROM dbo.conference_halls WHERE Id = @Id`,
     { Id: hall.Id },
-  );
-  const organizerName = `${user.firstName} ${user.lastName}`.trim();
+  ).catch(() => null);
+  const organizerName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
+  const organizerEmail = String(user.email ?? input.mailId ?? '').trim().toLowerCase() || null;
   const guests = inviteTargets.map((email) => ({
     email,
     name: (input.attendees ?? []).find((a) => a.email?.trim().toLowerCase() === email)?.name ?? null,
@@ -373,15 +392,31 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
           startAt,
           endAt,
           purpose: input.purpose ?? null,
-          organizerEmail: user.email.trim().toLowerCase(),
+          organizerEmail,
           organizerName,
           bookingNumber: number,
           guests,
         }));
-  const inviteMail = await sendMeetingInvites(cards);
+  let inviteMail: InviteSendResult = { configured: false, sent: 0, failed: cards.length };
+  try {
+    inviteMail = await sendMeetingInvites(cards);
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Booking created but invitation email failed');
+    inviteMail = {
+      configured: false,
+      sent: 0,
+      failed: cards.length,
+      error: err instanceof Error ? err.message : 'Invitation email failed',
+    };
+  }
 
   emit(SOCKET_EVENTS.BOOKING_CREATED, { id, hallId: hall.Id, hallCode: hall.Code, status });
-  return { ...(await getBookingById(id, user)), inviteMail };
+  try {
+    return { ...(await getBookingById(id, user)), inviteMail };
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Booking saved but reload failed');
+    return { Id: id, BookingNumber: number, Status: status, inviteMail };
+  }
 }
 
 /** Update booking */
@@ -427,7 +462,7 @@ export async function updateBooking(user: AuthUser, id: string, input: Partial<C
         DepartmentId: input.departmentId ? await resolveDepartmentId(input.departmentId) : null,
         ContactNumber: input.contactNumber ?? null,
         HallId: hallId,
-        BookingDate: startAt.toISOString().slice(0, 10),
+        BookingDate: dateInAppTz(startAt),
         StartAt: startAt,
         EndAt: endAt,
         AttendeeCount: attendeeCount,

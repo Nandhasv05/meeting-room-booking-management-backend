@@ -3,10 +3,14 @@ import type { Request } from 'express';
 import type { AuthUser, Paged } from '../types/index.js';
 import type { UserRow } from '../types/db.js';
 import {
+  createDirectoryUser,
   findDirectoryUserById,
   listClientApiUsers,
   mapClientApiUser,
+  readRevealablePassword,
+  resetDirectoryPassword,
   searchClientApiUsers,
+  updateDirectoryUser,
 } from './clientApiUsers.js';
 
 export async function listUsers(filters: {
@@ -20,10 +24,10 @@ export async function listUsers(filters: {
   return listClientApiUsers(filters);
 }
 
-export async function getUser(id: string): Promise<UserRow> {
+export async function getUser(actor: AuthUser, id: string): Promise<UserRow & { CurrentPassword?: string }> {
   const directory = await findDirectoryUserById(id);
   if (!directory) throw new AppError('User not found.', 404);
-  return mapClientApiUser({
+  const mapped = mapClientApiUser({
     Id: directory.id,
     UserName: directory.userName,
     Email: directory.email,
@@ -32,45 +36,54 @@ export async function getUser(id: string): Promise<UserRow> {
     Role: directory.role,
     IsAdmin: directory.isAdmin,
   });
+  if (!actor.permissions.includes('users.manage')) return mapped;
+  const currentPassword = await readRevealablePassword(directory.id);
+  return currentPassword ? { ...mapped, CurrentPassword: currentPassword } : mapped;
 }
 
 export async function createUser(
-  _actor: AuthUser,
-  _input: {
+  actor: AuthUser,
+  input: {
     employeeId: string;
-    firstName: string;
-    lastName: string;
+    firstName?: string;
+    lastName?: string;
     email: string;
     phone?: string;
+    department?: string;
     departmentId?: string;
     designation?: string;
     roleId: string;
     password: string;
+    status?: 'ACTIVE' | 'DISABLED';
   },
   _req: Request,
 ): Promise<UserRow> {
-  throw new AppError('Users are managed in CLIENT_API_LIVE dbo.users.', 400);
+  return createDirectoryUser(actor, input);
 }
 
 export async function updateUser(
-  _actor: AuthUser,
-  _id: string,
-  _input: Partial<{
+  actor: AuthUser,
+  id: string,
+  input: Partial<{
     firstName: string;
     lastName: string;
+    email: string;
     phone: string;
+    department: string | null;
     departmentId: string | null;
     designation: string;
     roleId: string;
     status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+    password: string;
+    employeeId: string;
   }>,
   _req: Request,
 ): Promise<UserRow> {
-  throw new AppError('Users are managed in CLIENT_API_LIVE dbo.users.', 400);
+  return updateDirectoryUser(actor, id, input);
 }
 
-export async function resetPassword(_actor: AuthUser, _id: string, _password: string): Promise<void> {
-  throw new AppError('Passwords are managed in CLIENT_API_LIVE dbo.users.', 400);
+export async function resetPassword(actor: AuthUser, id: string, password: string): Promise<void> {
+  await resetDirectoryPassword(actor, id, password);
 }
 
 export async function searchEmployees(q: string) {
