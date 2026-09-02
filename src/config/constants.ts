@@ -90,4 +90,5 @@ export const AUDIT_ACTIONS = {
   MAINTENANCE_CREATED: 'Maintenance Created',
   USER_CREATED: 'User Created',
   ROLE_CHANGED: 'Role Changed',
+  UNAUTHORIZED: 'Unauthorized',
 } as const;

@@ -219,7 +219,9 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
   const departmentId = await resolveDepartmentId(input.departmentId);
   // No approval step: a free hall and a free slot are the only gate.
   const status = input.draft ? 'DRAFT' : 'CONFIRMED';
-  const organizerId = input.organizerId ?? user.id;
+  const organizerId = user.permissions.includes('bookings.view_all') && input.organizerId
+    ? input.organizerId
+    : user.id;
   const number = bookingNumber(startAt);
   const qr = newQrToken();
   let id = '';
@@ -429,6 +431,11 @@ export async function updateBooking(user: AuthUser, id: string, input: Partial<C
   const startAt = input.startAt ? new Date(input.startAt) : new Date(existing.StartAt);
   const endAt = input.endAt ? new Date(input.endAt) : new Date(existing.EndAt);
   combineRange(startAt, endAt);
+  if (input.startAt && startAt.getTime() < Date.now() - 60_000) {
+    throw new AppError(
+      'Cannot move a booking into the past. Pick a later start time or a future date.',
+    );
+  }
   const hallId = input.hallId ?? existing.HallId;
   const attendeeCount = input.attendeeCount ?? existing.AttendeeCount;
   const hall = await assertHallReady(hallId, startAt, endAt, attendeeCount);
@@ -491,6 +498,19 @@ export async function updateBooking(user: AuthUser, id: string, input: Partial<C
     action: AUDIT_ACTIONS.BOOKING_UPDATED,
     module: 'bookings',
     recordId: id,
+    oldValue: {
+      eventName: existing.EventName,
+      hallId: existing.HallId,
+      startAt: existing.StartAt,
+      endAt: existing.EndAt,
+      status: existing.Status,
+    },
+    newValue: {
+      eventName: input.eventName ?? existing.EventName,
+      hallId,
+      startAt,
+      endAt,
+    },
     req,
   });
   emit(SOCKET_EVENTS.BOOKING_UPDATED, { id, hallId: hall.Id, hallCode: hall.Code, status: existing.Status });

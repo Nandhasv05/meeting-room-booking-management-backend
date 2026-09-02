@@ -7,6 +7,8 @@ import { verifyAccessToken } from '../utils/jwt.js';
 import { AppError } from '../utils/AppError.js';
 import { directoryToAuth } from '../services/auth.service.js';
 import { findDirectoryUserById } from '../services/clientApiUsers.js';
+import { writeAudit } from './auditLogger.js';
+import { AUDIT_ACTIONS } from '../config/constants.js';
 import type { AuthUser } from '../types/index.js';
 
 /** Authenticate */
@@ -24,7 +26,6 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     }
     const auth: AuthUser = directoryToAuth(directory, {
       username: directory.userName,
-      role: claims.role,
     });
     req.user = auth;
     next();
@@ -48,6 +49,14 @@ export function authorize(...required: string[]) {
     }
     const ok = required.some((code) => user.permissions.includes(code));
     if (!ok) {
+      void writeAudit({
+        userId: user.id,
+        action: AUDIT_ACTIONS.UNAUTHORIZED,
+        module: 'auth',
+        recordId: user.id,
+        newValue: { required, path: req.originalUrl, method: req.method },
+        req,
+      });
       next(new AppError('You do not have permission to perform this action.', 403));
       return;
     }
