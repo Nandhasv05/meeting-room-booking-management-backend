@@ -5,9 +5,12 @@ import { ADMIN_PERMISSIONS, EMPLOYEE_PERMISSIONS, isDirectoryAdmin } from '../co
 import type { AuthUser } from '../types/index.js';
 
 export async function listRoles() {
-  const users = await query<{ Department: string | null; Role: string | null; IsAdmin: unknown }>(
-    `SELECT Department, Role, IsAdmin FROM dbo.users`,
-  );
+  let users: Array<{ Department: string | null; Role: string | null; IsAdmin?: unknown }> = [];
+  try {
+    users = await query(`SELECT Department, Role, IsAdmin FROM dbo.users`);
+  } catch {
+    users = await query(`SELECT Department, Role FROM dbo.users`);
+  }
   const admins = users.filter((u) =>
     isDirectoryAdmin({ department: u.Department, role: u.Role, isAdmin: u.IsAdmin }),
   ).length;

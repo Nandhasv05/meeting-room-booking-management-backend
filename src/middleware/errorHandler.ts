@@ -23,10 +23,26 @@ function errorCode(err: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/** AppError can fail instanceof across mixed dist/src copies — duck-type as well. */
+function asAppError(err: unknown): AppError | null {
+  if (err instanceof AppError) return err;
+  if (
+    err &&
+    typeof err === 'object' &&
+    (err as { isOperational?: unknown }).isOperational === true &&
+    typeof (err as { statusCode?: unknown }).statusCode === 'number' &&
+    typeof (err as { message?: unknown }).message === 'string'
+  ) {
+    return err as AppError;
+  }
+  return null;
+}
+
 /** Error handler */
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
-  if (err instanceof AppError) {
-    fail(res, err.message, err.statusCode, err.details);
+  const appErr = asAppError(err);
+  if (appErr) {
+    fail(res, appErr.message, appErr.statusCode, appErr.details);
     return;
   }
 
@@ -54,9 +70,41 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  /** AggregateError and some driver errors carry an empty message, which used to
-   * surface as a blank 500 with no clue about the cause. */
   const raw = err instanceof Error ? err.message : '';
+  if (/Violation of UNIQUE KEY constraint/i.test(raw)) {
+    const value = raw.match(/duplicate key value is \(([^)]+)\)/i)?.[1];
+    fail(res, value ? `That code is already in use (${value}).` : 'That code is already in use.', 409);
+    return;
+  }
+  if (/String or binary data would be truncated/i.test(raw)) {
+    fail(res, 'One of the fields is too long. Shorten the purpose, notes, or invite list.', 400);
+    return;
+  }
+  if (/Conversion failed|Operand type clash|Invalid date/i.test(raw)) {
+    fail(res, 'Booking could not be saved. Check the hall, department, and start/end times.', 400);
+    return;
+  }
+  if (/permission was denied|is not allowed to/i.test(raw)) {
+    fail(
+      res,
+      isProd
+        ? 'Service temporarily unavailable. Please retry shortly.'
+        : raw,
+      503,
+    );
+    return;
+  }
+  if (/Invalid column name/i.test(raw)) {
+    fail(
+      res,
+      isProd
+        ? 'Booking catalog is out of date. Ask IT to apply booking_schema.sql.'
+        : raw,
+      503,
+    );
+    return;
+  }
+
   const detail = raw || code || (err instanceof Error ? err.name : '') || 'Unknown error';
   fail(res, isProd ? 'An unexpected error occurred.' : detail, 500);
 }

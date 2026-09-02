@@ -34,7 +34,7 @@ const schema = z.object({
   JWT_ACCESS_EXPIRES: z.string().default('15m'),
   JWT_REFRESH_EXPIRES: z.string().default('7d'),
   FRONTEND_URL: z.string().default('http://10.103.10.32'),
-  API_URL: z.string().default('http://10.103.10.33/api'),
+  API_URL: z.string().default('http://10.103.10.32/api'),
   API_CRYPTO_KEY: z.string().min(8).default('MeetingHallApiKey'),
   PORTAL_SSO_SECRET: z.string().optional().default(''),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),

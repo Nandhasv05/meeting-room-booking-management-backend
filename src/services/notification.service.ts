@@ -22,19 +22,23 @@ export async function notify(input: {
   relatedModule?: string;
   relatedId?: string;
 }): Promise<void> {
-  const id = await insert(
-    `INSERT INTO dbo.notifications (UserId, Type, Title, Message, RelatedModule, RelatedId, CreatedAt)
-     VALUES (@UserId, @Type, @Title, @Message, @RelatedModule, @RelatedId, SYSUTCDATETIME())`,
-    {
-      UserId: input.userId,
-      Type: input.type,
-      Title: input.title,
-      Message: input.message,
-      RelatedModule: input.relatedModule ?? null,
-      RelatedId: input.relatedId ?? null,
-    },
-  );
-  getIo()?.to(`user:${input.userId}`).emit(SOCKET_EVENTS.NOTIFICATION, { id, ...input });
+  try {
+    const id = await insert(
+      `INSERT INTO dbo.notifications (UserId, Type, Title, Message, RelatedModule, RelatedId, CreatedAt)
+       VALUES (@UserId, @Type, @Title, @Message, @RelatedModule, @RelatedId, SYSUTCDATETIME())`,
+      {
+        UserId: input.userId,
+        Type: input.type,
+        Title: input.title,
+        Message: input.message,
+        RelatedModule: input.relatedModule ?? null,
+        RelatedId: input.relatedId ?? null,
+      },
+    );
+    getIo()?.to(`user:${input.userId}`).emit(SOCKET_EVENTS.NOTIFICATION, { id, ...input });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'notify failed');
+  }
 }
 
 export async function notifyMany(

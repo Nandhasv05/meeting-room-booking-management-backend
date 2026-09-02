@@ -140,10 +140,14 @@ export const createBookingSchema = {
 export const availabilityCheckSchema = {
   body: z.object({
     hallId: dbId.optional(),
-    userIds: z.array(dbId).max(50).optional(),
+    userIds: z
+      .array(z.union([z.string(), z.number()]))
+      .max(50)
+      .optional()
+      .transform((ids) => (ids ?? []).map(String).filter((id) => /^\d+$/.test(id))),
     startAt: z.string().min(10),
     endAt: z.string().min(10),
-    attendeeCount: z.number().int().positive().optional(),
+    attendeeCount: z.coerce.number().int().positive().optional(),
     excludeBookingId: dbId.optional(),
   }),
 };

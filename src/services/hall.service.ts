@@ -82,31 +82,57 @@ type HallInput = {
 };
 
 export async function createHall(actor: AuthUser, input: HallInput, req: Request) {
-  const id = await insert(
-    `INSERT INTO dbo.conference_halls
-      (Name, Code, Description, Location, Building, Floor, Capacity, HallType, Status, ImageUrl,
-       OpeningTime, ClosingTime, ContactPersonId, IsActive, CreatedBy, UpdatedBy)
-     VALUES
-      (@Name, @Code, @Description, @Location, @Building, @Floor, @Capacity, @HallType, @Status, @ImageUrl,
-       CAST(@OpeningTime AS TIME), CAST(@ClosingTime AS TIME), @ContactPersonId, @IsActive, @Actor, @Actor)`,
-    {
-      Name: input.name.trim(),
-      Code: input.code.trim().toUpperCase(),
-      Description: input.description ?? null,
-      Location: input.location ?? null,
-      Building: input.building ?? null,
-      Floor: input.floor ?? null,
-      Capacity: input.capacity,
-      HallType: input.hallType,
-      Status: input.status ?? 'AVAILABLE',
-      ImageUrl: input.imageUrl ?? null,
-      OpeningTime: input.openingTime,
-      ClosingTime: input.closingTime,
-      ContactPersonId: input.contactPersonId ?? null,
-      IsActive: input.isActive ?? true,
-      Actor: actor.id,
-    },
+  const code = input.code.trim().toUpperCase();
+  const existing = await queryOne<{ Id: string | number; DeletedAt: Date | null }>(
+    `SELECT Id, DeletedAt FROM dbo.conference_halls WHERE Code = @Code`,
+    { Code: code },
   );
+  if (existing && existing.DeletedAt == null) {
+    throw new AppError(`Hall code ${code} is already in use.`, 409);
+  }
+
+  const payload = {
+    Name: input.name.trim(),
+    Code: code,
+    Description: input.description ?? null,
+    Location: input.location ?? null,
+    Building: input.building ?? null,
+    Floor: input.floor ?? null,
+    Capacity: input.capacity,
+    HallType: input.hallType,
+    Status: input.status ?? 'AVAILABLE',
+    ImageUrl: input.imageUrl ?? null,
+    OpeningTime: input.openingTime,
+    ClosingTime: input.closingTime,
+    ContactPersonId: input.contactPersonId ?? null,
+    IsActive: input.isActive ?? true,
+    Actor: actor.id,
+  };
+
+  let id: string;
+  if (existing) {
+    id = String(existing.Id);
+    await query(
+      `UPDATE dbo.conference_halls SET
+          Name = @Name, Description = @Description, Location = @Location, Building = @Building,
+          Floor = @Floor, Capacity = @Capacity, HallType = @HallType, Status = @Status, ImageUrl = @ImageUrl,
+          OpeningTime = CAST(@OpeningTime AS TIME), ClosingTime = CAST(@ClosingTime AS TIME),
+          ContactPersonId = @ContactPersonId, IsActive = @IsActive, DeletedAt = NULL,
+          UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @Actor
+       WHERE Id = @Id`,
+      { ...payload, Id: id },
+    );
+  } else {
+    id = await insert(
+      `INSERT INTO dbo.conference_halls
+        (Name, Code, Description, Location, Building, Floor, Capacity, HallType, Status, ImageUrl,
+         OpeningTime, ClosingTime, ContactPersonId, IsActive, CreatedBy, UpdatedBy)
+       VALUES
+        (@Name, @Code, @Description, @Location, @Building, @Floor, @Capacity, @HallType, @Status, @ImageUrl,
+         CAST(@OpeningTime AS TIME), CAST(@ClosingTime AS TIME), @ContactPersonId, @IsActive, @Actor, @Actor)`,
+      payload,
+    );
+  }
   await syncFacilities(id, input.facilityIds ?? []);
   await syncLayouts(id, input.layouts ?? []);
   await writeAudit({
@@ -222,9 +248,17 @@ export async function listFacilities() {
 }
 
 export async function createFacility(input: { code: string; name: string; icon?: string }) {
+  const code = input.code.trim().toUpperCase();
+  const existing = await queryOne<{ Id: string | number }>(
+    `SELECT Id FROM dbo.facilities WHERE Code = @Code`,
+    { Code: code },
+  );
+  if (existing) {
+    throw new AppError(`Facility code ${code} is already in use.`, 409);
+  }
   const id = await insert(
     `INSERT INTO dbo.facilities (Code, Name, Icon) VALUES (@Code, @Name, @Icon)`,
-    { Code: input.code.trim().toUpperCase(), Name: input.name.trim(), Icon: input.icon ?? null },
+    { Code: code, Name: input.name.trim(), Icon: input.icon ?? null },
   );
   return queryOne(`SELECT Id, Code, Name, Icon, IsActive FROM dbo.facilities WHERE Id = @Id`, { Id: id });
 }

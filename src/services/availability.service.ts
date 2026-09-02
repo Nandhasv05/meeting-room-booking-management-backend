@@ -3,6 +3,7 @@
 //DESCRIPTION : Free/busy lookups for halls and employees before a booking is created
 // DATE : 2026-08-26
 import { query, queryOne } from '../config/database.js';
+import { asClock, clockInAppTz } from '../utils/clock.js';
 
 /** Slot conflict */
 export type SlotConflict = {
@@ -51,11 +52,6 @@ export type AvailabilityInput = {
 
 /** Statuses that still hold a slot. Cancelled/rejected bookings free the room. */
 const HOLDS_SLOT = `Status NOT IN (N'CANCELLED', N'REJECTED', N'DRAFT', N'NO_SHOW')`;
-
-/** Clock */
-function clock(d: Date) {
-  return d.toTimeString().slice(0, 8);
-}
 
 /** Hall availability */
 async function hallAvailability(
@@ -115,8 +111,10 @@ async function hallAvailability(
     blockers.push(`Already booked: ${conflicts[0]?.EventName ?? 'another event'}.`);
   }
   if (maintenance.length) blockers.push('Under maintenance for this window.');
-  if (clock(startAt) < hall.OpeningTime || clock(endAt) > hall.ClosingTime) {
-    blockers.push(`Outside hall hours ${hall.OpeningTime.slice(0, 5)}–${hall.ClosingTime.slice(0, 5)}.`);
+  const opening = asClock(hall.OpeningTime);
+  const closing = asClock(hall.ClosingTime);
+  if (clockInAppTz(startAt) < opening || clockInAppTz(endAt) > closing) {
+    blockers.push(`Outside hall hours ${opening.slice(0, 5)}–${closing.slice(0, 5)}.`);
   }
   if (attendeeCount && attendeeCount > hall.Capacity) {
     blockers.push(`Attendees exceed capacity (${hall.Capacity}).`);
@@ -126,8 +124,8 @@ async function hallAvailability(
     hallId: hall.Id,
     hallName: hall.Name,
     capacity: hall.Capacity,
-    openingTime: hall.OpeningTime,
-    closingTime: hall.ClosingTime,
+    openingTime: opening,
+    closingTime: closing,
     available: blockers.length === 0,
     blockers,
     conflicts,
@@ -200,12 +198,16 @@ async function peopleAvailability(
 export async function checkAvailability(input: AvailabilityInput) {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+    return { hall: null, people: [] as PersonAvailability[] };
+  }
+  const userIds = (input.userIds ?? []).map(String).filter((id) => /^\d+$/.test(id));
   const [hall, people] = await Promise.all([
     input.hallId
       ? hallAvailability(input.hallId, startAt, endAt, input.attendeeCount, input.excludeBookingId)
       : Promise.resolve(null),
-    input.userIds?.length
-      ? peopleAvailability(input.userIds, startAt, endAt, input.excludeBookingId)
+    userIds.length
+      ? peopleAvailability(userIds, startAt, endAt, input.excludeBookingId)
       : Promise.resolve([] as PersonAvailability[]),
   ]);
   return { hall, people };

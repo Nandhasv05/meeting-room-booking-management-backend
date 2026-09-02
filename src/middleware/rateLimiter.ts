@@ -18,12 +18,22 @@ function isHealth(req: Request): boolean {
   return path === '/health' || path === '/api/health' || path.endsWith('/health');
 }
 
+function fromLocalProxy(req: Request): boolean {
+  const ip = String(req.ip || req.socket.remoteAddress || '');
+  return ip === '127.0.0.1' || ip === '::1' || ip.endsWith('127.0.0.1');
+}
+
+function skipSharedOfficeIp(req: Request): boolean {
+  return isHealth(req) || fromLocalProxy(req);
+}
+
 /** Login limiter */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 50,
+  limit: 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipSharedOfficeIp,
   keyGenerator: clientKey,
   validate: { xForwardedForHeader: false },
   message: { success: false, message: 'Too many login attempts. Try again later.', data: null },
@@ -35,7 +45,7 @@ export const apiLimiter = rateLimit({
   limit: 5000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: isHealth,
+  skip: skipSharedOfficeIp,
   keyGenerator: clientKey,
   validate: { xForwardedForHeader: false },
   message: { success: false, message: 'Rate limit exceeded.', data: null },

@@ -12,7 +12,7 @@ import type { UserRow } from '../types/db.js';
 
 type RawUser = Record<string, unknown>;
 
-const USER_COLUMNS = `Id, UserName, Email, Department, IsActive, Role, IsAdmin, last_login_time`;
+const USER_COLUMNS = `Id, UserName, Email, Department, IsActive, Role, last_login_time`;
 const AUTH_COLUMNS = `${USER_COLUMNS}, PasswordHash, LastKnownPassword`;
 
 function pick(row: RawUser, ...keys: string[]): unknown {
@@ -501,24 +501,9 @@ export async function createDirectoryUser(_actor: AuthUser, input: DirectoryUser
       request.input('IsActive', sql.Bit, isActive);
       request.input('Role', sql.NVarChar(80), role);
       request.input('Department', sql.NVarChar(80), department);
-      request.input('IsAdmin', sql.Bit, isAdmin);
       await request.query(`
-        INSERT INTO dbo.users (UserName, Email, PasswordHash, LastKnownPassword, IsActive, Role, Department, IsAdmin)
-        VALUES (@UserName, @Email, @PasswordHash, @LastKnownPassword, @IsActive, @Role, @Department, @IsAdmin)
-      `);
-    },
-    async () => {
-      const request = pool.request();
-      request.input('UserName', sql.NVarChar(80), userName);
-      request.input('Email', sql.NVarChar(180), email);
-      request.input('PasswordHash', sql.NVarChar(200), hash);
-      request.input('IsActive', sql.Bit, isActive);
-      request.input('Role', sql.NVarChar(80), role);
-      request.input('Department', sql.NVarChar(80), department);
-      request.input('IsAdmin', sql.Bit, isAdmin);
-      await request.query(`
-        INSERT INTO dbo.users (UserName, Email, PasswordHash, IsActive, Role, Department, IsAdmin)
-        VALUES (@UserName, @Email, @PasswordHash, @IsActive, @Role, @Department, @IsAdmin)
+        INSERT INTO dbo.users (UserName, Email, PasswordHash, LastKnownPassword, IsActive, Role, Department)
+        VALUES (@UserName, @Email, @PasswordHash, @LastKnownPassword, @IsActive, @Role, @Department)
       `);
     },
     async () => {
@@ -548,10 +533,24 @@ export async function createDirectoryUser(_actor: AuthUser, input: DirectoryUser
       request.input('IsActive', sql.Bit, isActive);
       request.input('Role', sql.NVarChar(80), role);
       request.input('Department', sql.NVarChar(80), department);
+      await request.query(`
+        INSERT INTO dbo.users (Id, UserName, Email, PasswordHash, IsActive, Role, Department)
+        VALUES (@Id, @UserName, @Email, @PasswordHash, @IsActive, @Role, @Department)
+      `);
+    },
+    async () => {
+      const request = pool.request();
+      request.input('UserName', sql.NVarChar(80), userName);
+      request.input('Email', sql.NVarChar(180), email);
+      request.input('PasswordHash', sql.NVarChar(200), hash);
+      request.input('LastKnownPassword', sql.NVarChar(200), input.password);
+      request.input('IsActive', sql.Bit, isActive);
+      request.input('Role', sql.NVarChar(80), role);
+      request.input('Department', sql.NVarChar(80), department);
       request.input('IsAdmin', sql.Bit, isAdmin);
       await request.query(`
-        INSERT INTO dbo.users (Id, UserName, Email, PasswordHash, IsActive, Role, Department, IsAdmin)
-        VALUES (@Id, @UserName, @Email, @PasswordHash, @IsActive, @Role, @Department, @IsAdmin)
+        INSERT INTO dbo.users (UserName, Email, PasswordHash, LastKnownPassword, IsActive, Role, Department, IsAdmin)
+        VALUES (@UserName, @Email, @PasswordHash, @LastKnownPassword, @IsActive, @Role, @Department, @IsAdmin)
       `);
     },
   ];
@@ -646,7 +645,6 @@ export async function updateDirectoryUser(
       request.input('HasDept', sql.Bit, department !== undefined ? 1 : 0);
       request.input('Role', sql.NVarChar(80), roleFields?.role ?? null);
       request.input('HasRole', sql.Bit, roleFields ? 1 : 0);
-      request.input('IsAdmin', sql.Bit, roleFields?.isAdmin ?? 0);
       request.input('IsActive', sql.Bit, isActive ?? 0);
       request.input('HasActive', sql.Bit, isActive !== undefined ? 1 : 0);
       await request.query(`
@@ -655,7 +653,6 @@ export async function updateDirectoryUser(
             Email = CASE WHEN @HasEmail = 1 THEN @Email ELSE Email END,
             Department = CASE WHEN @HasDept = 1 THEN @Department ELSE Department END,
             Role = CASE WHEN @HasRole = 1 THEN @Role ELSE Role END,
-            IsAdmin = CASE WHEN @HasRole = 1 THEN @IsAdmin ELSE IsAdmin END,
             IsActive = CASE WHEN @HasActive = 1 THEN @IsActive ELSE IsActive END
         WHERE CAST(Id AS nvarchar(64)) = @Id OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Id)
       `);
@@ -671,6 +668,7 @@ export async function updateDirectoryUser(
       request.input('HasDept', sql.Bit, department !== undefined ? 1 : 0);
       request.input('Role', sql.NVarChar(80), roleFields?.role ?? null);
       request.input('HasRole', sql.Bit, roleFields ? 1 : 0);
+      request.input('IsAdmin', sql.Bit, roleFields?.isAdmin ?? 0);
       request.input('IsActive', sql.Bit, isActive ?? 0);
       request.input('HasActive', sql.Bit, isActive !== undefined ? 1 : 0);
       await request.query(`
@@ -679,6 +677,7 @@ export async function updateDirectoryUser(
             Email = CASE WHEN @HasEmail = 1 THEN @Email ELSE Email END,
             Department = CASE WHEN @HasDept = 1 THEN @Department ELSE Department END,
             Role = CASE WHEN @HasRole = 1 THEN @Role ELSE Role END,
+            IsAdmin = CASE WHEN @HasRole = 1 THEN @IsAdmin ELSE IsAdmin END,
             IsActive = CASE WHEN @HasActive = 1 THEN @IsActive ELSE IsActive END
         WHERE CAST(Id AS nvarchar(64)) = @Id OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Id)
       `);

@@ -339,7 +339,18 @@ export async function sendCancellationCard(card: InvitationCard): Promise<boolea
 
 /** Send meeting invites */
 export async function sendMeetingInvites(cards: InvitationCard[]): Promise<InviteSendResult> {
-  const cfg = await getMailConfig();
+  let cfg;
+  try {
+    cfg = await getMailConfig();
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Mail config failed');
+    return {
+      configured: false,
+      sent: 0,
+      failed: cards.length,
+      error: 'Mail settings could not be loaded.',
+    };
+  }
   const configured = mailIsConfigured(cfg);
   if (!configured) {
     return {
