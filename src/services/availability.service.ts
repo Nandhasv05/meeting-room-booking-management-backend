@@ -3,7 +3,29 @@
 //DESCRIPTION : Free/busy lookups for halls and employees before a booking is created
 // DATE : 2026-08-26
 import { query, queryOne } from '../config/database.js';
+import { logger } from '../config/logger.js';
 import { asClock, clockInAppTz } from '../utils/clock.js';
+
+function asDirectoryIds(ids: string[]): string[] {
+  return [
+    ...new Set(
+      ids
+        .map(String)
+        .map((id) => id.trim())
+        .filter((id) => id && id.length <= 64 && !id.startsWith('guest:')),
+    ),
+  ].slice(0, 50);
+}
+
+function bindIdList(ids: string[], prefix: string, inputs: Record<string, unknown>): string {
+  return ids
+    .map((id, i) => {
+      const key = `${prefix}${i}`;
+      inputs[key] = id;
+      return `@${key}`;
+    })
+    .join(', ');
+}
 
 /** Slot conflict */
 export type SlotConflict = {
@@ -140,7 +162,10 @@ async function peopleAvailability(
   endAt: Date,
   excludeBookingId?: string,
 ): Promise<PersonAvailability[]> {
-  const ids = userIds.map(String).join(',');
+  const ids = asDirectoryIds(userIds);
+  if (!ids.length) return [];
+  const peopleInputs: Record<string, unknown> = {};
+  const peopleIn = bindIdList(ids, 'Uid', peopleInputs);
   const people = await query<{
     Id: string;
     FirstName: string;
@@ -151,11 +176,18 @@ async function peopleAvailability(
   }>(
     `SELECT u.Id, u.UserName AS FirstName, N'' AS LastName, u.Email, u.UserName AS EmployeeId, u.Department AS DepartmentName
      FROM dbo.users u
-     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))`,
-    { UserIds: ids },
+     WHERE CAST(u.Id AS nvarchar(64)) IN (${peopleIn})
+        OR LTRIM(RTRIM(u.UserName)) IN (${peopleIn})`,
+    peopleInputs,
   );
   if (!people.length) return [];
 
+  const busyInputs: Record<string, unknown> = {
+    StartAt: startAt,
+    EndAt: endAt,
+    ExcludeBookingId: excludeBookingId ?? null,
+  };
+  const busyIn = bindIdList(ids, 'Uid', busyInputs);
   const busy = await query<SlotConflict & { UserId: string }>(
     `SELECT DISTINCT u.Id AS UserId, b.Id, b.BookingNumber, b.EventName, b.StartAt, b.EndAt, b.Status,
             h.Name AS HallName
@@ -174,10 +206,13 @@ async function peopleAvailability(
         )
       )
      JOIN dbo.conference_halls h ON h.Id = b.HallId
-     WHERE CAST(u.Id AS nvarchar(64)) IN (SELECT value FROM STRING_SPLIT(@UserIds, ','))
+     WHERE (
+          CAST(u.Id AS nvarchar(64)) IN (${busyIn})
+          OR LTRIM(RTRIM(u.UserName)) IN (${busyIn})
+        )
        AND (@ExcludeBookingId IS NULL OR b.Id <> @ExcludeBookingId)
      ORDER BY b.StartAt`,
-    { UserIds: ids, StartAt: startAt, EndAt: endAt, ExcludeBookingId: excludeBookingId ?? null },
+    busyInputs,
   );
 
   return people.map((u) => {
@@ -185,7 +220,7 @@ async function peopleAvailability(
     return {
       userId: u.Id,
       name: `${u.FirstName} ${u.LastName}`.trim(),
-      email: u.Email,
+      email: u.Email ?? '',
       employeeId: u.EmployeeId,
       department: u.DepartmentName,
       available: conflicts.length === 0,
@@ -201,14 +236,20 @@ export async function checkAvailability(input: AvailabilityInput) {
   if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
     return { hall: null, people: [] as PersonAvailability[] };
   }
-  const userIds = (input.userIds ?? []).map(String).filter((id) => /^\d+$/.test(id));
-  const [hall, people] = await Promise.all([
-    input.hallId
-      ? hallAvailability(input.hallId, startAt, endAt, input.attendeeCount, input.excludeBookingId)
-      : Promise.resolve(null),
-    userIds.length
-      ? peopleAvailability(userIds, startAt, endAt, input.excludeBookingId)
-      : Promise.resolve([] as PersonAvailability[]),
-  ]);
+  const userIds = asDirectoryIds(input.userIds ?? []);
+  const hall = input.hallId
+    ? await hallAvailability(input.hallId, startAt, endAt, input.attendeeCount, input.excludeBookingId)
+    : null;
+  let people: PersonAvailability[] = [];
+  if (userIds.length) {
+    try {
+      people = await peopleAvailability(userIds, startAt, endAt, input.excludeBookingId);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'People availability skipped; hall check still returned',
+      );
+    }
+  }
   return { hall, people };
 }

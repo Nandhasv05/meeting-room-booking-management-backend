@@ -1,6 +1,34 @@
 import { z } from 'zod';
 import { EVENT_TYPES, HALL_TYPES, HALL_STATUSES } from '../config/constants.js';
 
+/** Intranet hosts such as user@client-api.local must be accepted. */
+const mailId = z
+  .string()
+  .trim()
+  .min(3)
+  .max(180)
+  .refine((value) => /^[^\s@]+@[^\s@]+$/.test(value), 'Enter a valid mail ID');
+
+const optionalMail = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  mailId.optional(),
+);
+
+function directoryIds(values: unknown): string[] {
+  const list = Array.isArray(values) ? values : [];
+  return [
+    ...new Set(
+      list
+        .map((value) => String(value ?? '').trim())
+        .filter((id) => id && id.length <= 64 && id !== 'undefined' && id !== 'null' && !id.startsWith('guest:')),
+    ),
+  ].slice(0, 50);
+}
+
+function onlyMailIds(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter((value) => /^[^\s@]+@[^\s@]+$/.test(value)))];
+}
+
 /** Table primary/foreign keys are BIGINT AUTO_INCREMENT (sent as digit strings). */
 export const dbId = z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).transform((v) => String(v));
 
@@ -110,8 +138,8 @@ export const createBookingSchema = {
     departmentId: z.union([z.string().trim().min(1).max(120), z.number().int().positive()]).transform((v) => String(v)),
     organizerId: dbId.optional(),
     contactNumber: z.string().max(30).optional(),
-    mailId: z.string().email().optional(),
-    invitationEmails: z.array(z.string().trim().email()).max(50).optional(),
+    mailId: optionalMail,
+    invitationEmails: z.array(z.string()).max(50).optional().transform(onlyMailIds),
     hallId: dbId,
     startAt: z.string().datetime({ offset: true }).or(z.string().min(10)),
     endAt: z.string().min(10),
@@ -128,7 +156,7 @@ export const createBookingSchema = {
           name: z.string(),
           employeeId: z.string().optional(),
           department: z.string().optional(),
-          email: z.string().trim().email().optional(),
+          email: optionalMail,
           phone: z.string().optional(),
         }),
       )
@@ -139,12 +167,11 @@ export const createBookingSchema = {
 
 export const availabilityCheckSchema = {
   body: z.object({
-    hallId: dbId.optional(),
-    userIds: z
-      .array(z.union([z.string(), z.number()]))
-      .max(50)
-      .optional()
-      .transform((ids) => (ids ?? []).map(String).filter((id) => /^\d+$/.test(id))),
+    hallId: z.preprocess(
+      (value) => (value == null || value === '' ? undefined : String(value).trim()),
+      z.string().min(1).max(64).optional(),
+    ),
+    userIds: z.preprocess(directoryIds, z.array(z.string()).max(50)).optional(),
     startAt: z.string().min(10),
     endAt: z.string().min(10),
     attendeeCount: z.coerce.number().int().positive().optional(),

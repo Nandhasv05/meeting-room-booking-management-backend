@@ -105,8 +105,29 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  const detail = raw || code || (err instanceof Error ? err.name : '') || 'Unknown error';
-  fail(res, isProd ? 'An unexpected error occurred.' : detail, 500);
+  if (/Cannot insert the value NULL/i.test(raw)) {
+    fail(res, 'Booking could not be saved. A required field was empty.', 400);
+    return;
+  }
+  if (/conflicted with the FOREIGN KEY/i.test(raw)) {
+    fail(res, 'Booking could not be saved. The hall, department, or organizer is invalid.', 400);
+    return;
+  }
+  if (/Invalid object name|STRING_SPLIT/i.test(raw)) {
+    fail(
+      res,
+      isProd
+        ? 'Booking catalog is out of date. Ask IT to apply booking_schema.sql.'
+        : raw,
+      503,
+    );
+    return;
+  }
+
+  const short = String(raw || code || (err instanceof Error ? err.name : '') || 'Unknown error')
+    .split(/\r?\n/)[0]
+    ?.slice(0, 220) || 'Unknown error';
+  fail(res, isProd ? `Booking failed. ${short}` : short, 500);
 }
 
 /** Not found */

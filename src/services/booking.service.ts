@@ -283,17 +283,19 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
       );
     }
     for (const attendee of input.attendees ?? []) {
-      const name = String(attendee.name ?? '').trim().slice(0, 160) || (attendee.email?.split('@')[0] ?? 'Guest');
+      const email = attendee.email?.trim().toLowerCase() || null;
+      const name = String(attendee.name ?? '').trim().slice(0, 160) || (email?.split('@')[0] ?? '');
+      if (!name && !email) continue;
       await txInsert(
         tx,
         `INSERT INTO dbo.booking_attendees (BookingId, Name, EmployeeId, Department, Email, Phone)
          VALUES (@BookingId, @Name, @EmployeeId, @Department, @Email, @Phone)`,
         {
           BookingId: id,
-          Name: name,
+          Name: name || 'Guest',
           EmployeeId: attendee.employeeId ?? null,
           Department: attendee.department ?? null,
-          Email: attendee.email ?? null,
+          Email: email,
           Phone: attendee.phone ?? null,
         },
       );
@@ -316,14 +318,18 @@ export async function createBooking(user: AuthUser, input: CreateBookingInput, r
     }
   }, sql.ISOLATION_LEVEL.SERIALIZABLE);
 
-  await writeAudit({
-    userId: user.id,
-    action: AUDIT_ACTIONS.BOOKING_CREATED,
-    module: 'bookings',
-    recordId: id,
-    newValue: { number, hall: hall.Code, startAt },
-    req,
-  });
+  try {
+    await writeAudit({
+      userId: user.id,
+      action: AUDIT_ACTIONS.BOOKING_CREATED,
+      module: 'bookings',
+      recordId: id,
+      newValue: { number, hall: hall.Code, startAt },
+      req,
+    });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Booking created but audit log failed');
+  }
 
   try {
     const managers = await query<{ Id: string }>(
