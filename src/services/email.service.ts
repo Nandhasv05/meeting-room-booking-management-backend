@@ -151,44 +151,160 @@ function greeting(card: InvitationCard): string {
 /** Build invitation HTML */
 export function buildInvitationHtml(card: InvitationCard, cancelled = false): string {
   const when = `${formatWhen(card.startAt)} – ${formatWhen(card.endAt)}`;
-  const location = card.hallLocation ? `<p style="margin:4px 0;color:#4a6354">${escapeHtml(card.hallLocation)}</p>` : '';
-  const purpose = card.purpose
-    ? `<p style="margin:16px 0 0;color:#1a3322"><strong>Agenda:</strong> ${escapeHtml(card.purpose)}</p>`
+  const locationText = card.hallLocation ? escapeHtml(card.hallLocation) : '';
+  const accentColor = cancelled ? '#dc2626' : '#1a56db';
+  const accentBg = cancelled ? '#fef2f2' : '#eff6ff';
+  const statusLabel = cancelled ? 'CANCELLED' : 'CONFIRMED';
+  const statusColor = cancelled ? '#dc2626' : '#16a34a';
+  const statusBg = cancelled ? '#fef2f2' : '#f0fdf4';
+
+  const guestListHtml = card.guests.length > 0
+    ? `<tr>
+        <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;vertical-align:top">Guests</td>
+        <td style="padding:12px 16px;color:#111827;font-size:14px;border-bottom:1px solid #f3f4f6">${card.guests.map(g => escapeHtml(g.name?.trim() || g.email)).join(', ')}</td>
+      </tr>`
     : '';
-  const title = cancelled ? 'This meeting has been cancelled' : 'You are invited to a meeting';
-  const header = cancelled ? '#7f1d1d' : '#122315';
+
+  const purposeHtml = card.purpose
+    ? `<div style="margin:24px 0 0;padding:16px 20px;background:#f9fafb;border-left:3px solid ${accentColor};border-radius:0 6px 6px 0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:6px">Agenda</div>
+        <div style="font-size:14px;color:#1f2937;line-height:1.6">${escapeHtml(card.purpose)}</div>
+      </div>`
+    : '';
+
   return `<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:24px;background:#e8f0eb;font-family:Segoe UI,Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d3ded7;border-radius:12px">
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="padding:32px 16px">
     <tr>
-      <td style="padding:20px 24px;background:${header};color:#fff;border-radius:12px 12px 0 0">
-        <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.75">evolv · Conference halls</div>
-        <h1 style="margin:8px 0 0;font-size:22px">${escapeHtml(card.eventName)}</h1>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding:24px">
-        <p style="margin:0 0 12px;color:#122315;font-size:15px">${greeting(card)} ${title}.</p>
-        <table width="100%" style="border-collapse:collapse;font-size:14px;color:#122315">
-          <tr><td style="padding:8px 0;width:120px;color:#64786d">When</td><td><strong>${escapeHtml(when)}</strong></td></tr>
-          <tr><td style="padding:8px 0;color:#64786d">Hall</td><td>${escapeHtml(card.hallName)}${location}</td></tr>
-          <tr><td style="padding:8px 0;color:#64786d">Type</td><td>${escapeHtml(card.eventType)}</td></tr>
-          <tr><td style="padding:8px 0;color:#64786d">Booking</td><td>${escapeHtml(card.bookingNumber)}</td></tr>
-          ${
-            card.organizerEmail
-              ? `<tr><td style="padding:8px 0;color:#64786d">Organizer</td><td>${escapeHtml(
-                  card.organizerName ? `${card.organizerName} · ${card.organizerEmail}` : card.organizerEmail,
-                )}</td></tr>`
-              : ''
-          }
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;margin:0 auto">
+
+          <!-- Logo / Brand -->
+          <tr>
+            <td style="padding:0 0 24px;text-align:center">
+              <span style="font-size:14px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#374151">EVOLV</span>
+              <span style="font-size:14px;color:#d1d5db;margin:0 8px">|</span>
+              <span style="font-size:13px;color:#6b7280;letter-spacing:.04em">Conference Halls</span>
+            </td>
+          </tr>
+
+          <!-- Main Card -->
+          <tr>
+            <td>
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+
+                <!-- Accent Top Bar -->
+                <tr>
+                  <td style="height:4px;background:${accentColor};border-radius:8px 8px 0 0;font-size:0;line-height:0">&nbsp;</td>
+                </tr>
+
+                <!-- Header -->
+                <tr>
+                  <td style="padding:28px 32px 0">
+                    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td>
+                          <div style="display:inline-block;padding:4px 10px;background:${statusBg};border-radius:4px;font-size:11px;font-weight:700;color:${statusColor};letter-spacing:.06em;text-transform:uppercase">${statusLabel}</div>
+                          <h1 style="margin:12px 0 0;font-size:22px;font-weight:700;color:#111827;line-height:1.3">${escapeHtml(card.eventName)}</h1>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <!-- Greeting -->
+                <tr>
+                  <td style="padding:20px 32px 0">
+                    <p style="margin:0;font-size:15px;color:#374151;line-height:1.6">${greeting(card)} ${cancelled ? 'The following meeting has been <strong>cancelled</strong>.' : 'You have been invited to the following meeting.'}</p>
+                  </td>
+                </tr>
+
+                <!-- Divider -->
+                <tr>
+                  <td style="padding:20px 32px 0">
+                    <div style="border-top:1px solid #e5e7eb"></div>
+                  </td>
+                </tr>
+
+                <!-- Details Table -->
+                <tr>
+                  <td style="padding:16px 32px 0">
+                    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse">
+                      <tr>
+                        <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;width:120px;vertical-align:top">Date &amp; Time</td>
+                        <td style="padding:12px 16px;color:#111827;font-size:14px;font-weight:600;border-bottom:1px solid #f3f4f6">${escapeHtml(when)}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;vertical-align:top">Venue</td>
+                        <td style="padding:12px 16px;color:#111827;font-size:14px;border-bottom:1px solid #f3f4f6">
+                          ${escapeHtml(card.hallName)}${locationText ? `<br><span style="color:#6b7280;font-size:13px">${locationText}</span>` : ''}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;vertical-align:top">Meeting Type</td>
+                        <td style="padding:12px 16px;color:#111827;font-size:14px;border-bottom:1px solid #f3f4f6">${escapeHtml(card.eventType)}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;vertical-align:top">Reference</td>
+                        <td style="padding:12px 16px;color:#111827;font-size:14px;border-bottom:1px solid #f3f4f6"><code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;font-size:13px;color:#374151">${escapeHtml(card.bookingNumber)}</code></td>
+                      </tr>
+                      ${card.organizerEmail
+      ? `<tr>
+                            <td style="padding:12px 16px;color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f3f4f6;vertical-align:top">Organizer</td>
+                            <td style="padding:12px 16px;color:#111827;font-size:14px;border-bottom:1px solid #f3f4f6">${escapeHtml(card.organizerName || '')}${card.organizerName ? '<br>' : ''}<a href="mailto:${escapeHtml(card.organizerEmail)}" style="color:${accentColor};text-decoration:none;font-size:13px">${escapeHtml(card.organizerEmail)}</a></td>
+                          </tr>`
+      : ''
+    }
+                      ${guestListHtml}
+                    </table>
+                  </td>
+                </tr>
+
+                <!-- Agenda -->
+                <tr>
+                  <td style="padding:0 32px">
+                    ${purposeHtml}
+                  </td>
+                </tr>
+
+                <!-- Calendar CTA -->
+                <tr>
+                  <td style="padding:24px 32px 0;text-align:center">
+                    <div style="padding:14px 20px;background:${accentBg};border-radius:6px">
+                      <span style="font-size:13px;color:${accentColor}">${cancelled
+      ? '📅 This calendar event has been cancelled. The attached .ics file will remove it from your calendar.'
+      : '📎 An .ics calendar invite is attached. Open it to add this meeting to your calendar.'
+    }</span>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="padding:28px 32px">
+                    <div style="border-top:1px solid #e5e7eb;padding-top:20px">
+                      <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;text-align:center">
+                        This is an automated notification from the <strong style="color:#6b7280">Evolv Conference Hall Booking System</strong>.<br>
+                        Please do not reply directly to this email.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+
+          <!-- Sub-Footer -->
+          <tr>
+            <td style="padding:20px 0;text-align:center">
+              <p style="margin:0;font-size:11px;color:#9ca3af">&copy; ${new Date().getFullYear()} Evolv Clothing Pvt Ltd. All rights reserved.</p>
+            </td>
+          </tr>
+
         </table>
-        ${purpose}
-        <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">${
-          cancelled
-            ? 'This calendar event has been cancelled.'
-            : 'Open the attached calendar invite to add this meeting to your calendar.'
-        }</p>
       </td>
     </tr>
   </table>
